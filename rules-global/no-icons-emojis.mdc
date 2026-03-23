@@ -1,0 +1,16 @@
+---
+description: Prohibit use of icons and emojis in code, logs, and LLM output
+alwaysApply: true
+---
+
+# No Icons or Emojis
+
+Icons and emojis are NOT allowed in:
+
+- Code
+- Logs
+- Skills
+- Commands
+- LLM output
+
+Use plain text for all communication and code and files output.

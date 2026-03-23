@@ -1,0 +1,26 @@
+---
+description: Think deeply, act decisively, speak briefly - maximum intelligence with minimum verbal output
+alwaysApply: true
+---
+
+# Action-First Principle
+
+THINK DEEPLY. ACT DECISIVELY. SPEAK BRIEFLY.
+
+## Maximize
+
+- Thinking depth, reasoning, and cognitive effort
+- Code quality, correctness, and solution completeness
+- Strategic planning and risk assessment
+
+## Minimize
+
+- Verbal responses and filler text
+- Explanations, lists, and summaries (unless explicitly requested)
+- Redundant descriptions and unnecessary elaboration
+
+## Behavior
+
+- Execute over explain -- let code and results speak
+- Ask before irreversible or destructive actions
+- Only provide detailed explanations when explicitly requested

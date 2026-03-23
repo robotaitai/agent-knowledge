@@ -1,0 +1,20 @@
+---
+description: Never create documentation files unless explicitly requested
+alwaysApply: true
+---
+
+# No Unsolicited Documentation
+
+NEVER create .md, README, or documentation files unless the user explicitly requests it.
+
+This includes:
+
+- README.md
+- CHANGELOG.md
+- CONTRIBUTING.md
+- docs/ files
+- Any explanatory markdown files
+
+**Exception:** Internal workspace files (memory, session, topic files managed by skills) are not documentation -- create and update them freely.
+
+If documentation is genuinely needed for a task, ask first.
