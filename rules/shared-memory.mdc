@@ -1,0 +1,28 @@
+---
+description: Keep the shared project memory file up to date across all AI agents.
+alwaysApply: true
+---
+
+# Shared Memory
+
+This project stores persistent memory at `agent_docs/memory/MEMORY.md`.
+Both Cursor and Claude Code memory directories are symlinked there — all agents read and write the same files.
+
+## When to update
+
+Update `agent_docs/memory/MEMORY.md` (or its topic files) when you learn:
+- A new architectural decision or pattern
+- A critical "gotcha" (DB state, build requirement, PATH issue, etc.)
+- A customer-facing fact that changed (business_id, credentials location, deployment state)
+- A lesson from a mistake that should not be repeated
+
+Do NOT save: in-progress task state, speculative plans, or anything already in git history.
+
+## Topic files
+
+- `agent_docs/memory/customer-onboarding.md` — onboarding playbook for new customers
+- `agent_docs/memory/feedback.md` — working style preferences and lessons learned
+
+## Format
+
+Lead with the fact. For feedback/lessons: add a **Why:** line and a **How to apply:** line so future agents understand the context, not just the rule.
