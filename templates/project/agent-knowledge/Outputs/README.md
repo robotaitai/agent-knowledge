@@ -21,3 +21,4 @@ Examples:
 - `architecture-summary.md`
 - `structural-map.md`
 - `graphify/` summaries
+- `token-measurements/` reports and task-run logs

@@ -60,7 +60,7 @@ doctor_validate_args=(--project "$TARGET_PROJECT")
 if [ "$DRY_RUN" -eq 1 ]; then
     doctor_validate_args+=(--dry-run)
 fi
-if ! "$SCRIPT_DIR/validate-knowledge.sh" "${doctor_validate_args[@]}"; then
+if ! kc_run_child_script "$SCRIPT_DIR/validate-knowledge.sh" "${doctor_validate_args[@]}"; then
     validation_status="error"
 fi
 

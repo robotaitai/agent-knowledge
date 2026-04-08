@@ -10,6 +10,7 @@ SUMMARY_FILE="${SUMMARY_FILE:-}"
 SHOW_HELP="${SHOW_HELP:-0}"
 
 KC_LAST_ACTION=""
+KC_CHILD_SUMMARY=""
 
 kc_now_utc() {
     date -u +"%Y-%m-%dT%H:%M:%SZ"
@@ -117,6 +118,29 @@ kc_write_json_output() {
     if [ "${JSON_MODE:-0}" -eq 1 ]; then
         printf '%s\n' "$json"
     fi
+}
+
+kc_run_child_script() {
+    local script="$1"
+    shift
+    local tmp_file=""
+    local exit_code=0
+
+    KC_CHILD_SUMMARY=""
+
+    if [ "${JSON_MODE:-0}" -eq 1 ]; then
+        tmp_file="$(mktemp)"
+        if ! "$script" "$@" --json --summary-file "$tmp_file" >/dev/null; then
+            exit_code=$?
+        fi
+        if [ -f "$tmp_file" ]; then
+            KC_CHILD_SUMMARY="$(cat "$tmp_file" 2>/dev/null || true)"
+            rm -f "$tmp_file"
+        fi
+        return "$exit_code"
+    fi
+
+    "$script" "$@"
 }
 
 kc_resolve_relative() {

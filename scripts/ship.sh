@@ -153,13 +153,13 @@ validate_args=(--project "$TARGET_PROJECT")
 if [ "$DRY_RUN" -eq 1 ]; then
     validate_args+=(--dry-run)
 fi
-"$SCRIPT_DIR/validate-knowledge.sh" "${validate_args[@]}"
+kc_run_child_script "$SCRIPT_DIR/validate-knowledge.sh" "${validate_args[@]}"
 
 sync_args=(--project "$TARGET_PROJECT" --compact)
 if [ "$DRY_RUN" -eq 1 ]; then
     sync_args+=(--dry-run)
 fi
-"$SCRIPT_DIR/update-knowledge.sh" "${sync_args[@]}"
+kc_run_child_script "$SCRIPT_DIR/update-knowledge.sh" "${sync_args[@]}"
 
 status_lines="$(git -C "$TARGET_PROJECT" status --short)"
 changed_files="$(kc_git_changed_files || true)"

@@ -293,14 +293,14 @@ import_args=(--project "$TARGET_PROJECT")
 if [ "$DRY_RUN" -eq 1 ]; then
     import_args+=(--dry-run)
 fi
-"$SCRIPT_DIR/import-agent-history.sh" "${import_args[@]}"
+kc_run_child_script "$SCRIPT_DIR/import-agent-history.sh" "${import_args[@]}"
 
 if [ "$RUN_COMPACTION" -eq 1 ]; then
     compact_args=(--project "$TARGET_PROJECT")
     if [ "$DRY_RUN" -eq 1 ]; then
         compact_args+=(--dry-run)
     fi
-    "$SCRIPT_DIR/compact-memory.sh" "${compact_args[@]}"
+    kc_run_child_script "$SCRIPT_DIR/compact-memory.sh" "${compact_args[@]}"
 fi
 
 kc_status_load

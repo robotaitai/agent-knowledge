@@ -232,7 +232,7 @@ if [ ! -f "$KNOWLEDGE_REAL_DIR/Memory/MEMORY.md" ] || [ ! -f "$KNOWLEDGE_REAL_DI
     if [ -n "$SUMMARY_FILE" ]; then
         :
     fi
-    "$bootstrap_cmd" "${bootstrap_args[@]}"
+    kc_run_child_script "$bootstrap_cmd" "${bootstrap_args[@]}"
     CHANGES+=("bootstrap")
 fi
 
