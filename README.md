@@ -1,6 +1,16 @@
 # agent-knowledge
 
-Adaptive, file-based project knowledge for AI coding agents.
+Persistent, file-based project memory for AI coding agents.
+
+One command gives any project a knowledge vault that agents read on startup,
+maintain during work, and carry across sessions -- no database, no server,
+just markdown files and a CLI.
+
+<p align="center">
+  <img src="docs/obsidian-graph.png" alt="Knowledge graph in Obsidian" width="720" />
+  <br />
+  <em>Project knowledge graph viewed in Obsidian</em>
+</p>
 
 ## Install
 
@@ -15,89 +25,87 @@ cd your-project
 agent-knowledge init
 ```
 
-That's it. Open Cursor, Claude, or Codex in the repo -- the agent picks up from there.
+Open Cursor, Claude, or Codex in the repo -- the agent picks up from there.
 
 `init` automatically:
 - infers the project slug from the directory name
-- creates the external knowledge vault under `~/agent-os/projects/<slug>/`
-- creates a `./agent-knowledge` symlink pointing to it
-- creates `.agent-project.yaml`, `AGENTS.md`, and the memory tree
-- detects Cursor, Claude, and Codex and installs integration bridge files
-- sets onboarding status to `pending` so the agent knows to run first-time ingestion
+- creates an external knowledge vault at `~/agent-os/projects/<slug>/`
+- symlinks `./agent-knowledge` into the repo as the local handle
+- detects Cursor, Claude, and Codex and installs integration files
+- bootstraps the memory tree and marks onboarding as `pending`
+- prints the prompt to kick off first-time agent ingestion
 
 ## How It Works
 
-Project knowledge lives **outside** the repo at `~/agent-os/projects/<slug>/`.
-Inside the repo, `./agent-knowledge` is a symlink to that external folder.
+```
+your-project/
+  .agent-project.yaml        # project config
+  AGENTS.md                   # instructions agents read on startup
+  agent-knowledge/            # symlink -> ~/agent-os/projects/<slug>/
+    STATUS.md                 # onboarding state + sync timestamps
+    Memory/                   # curated, durable knowledge (source of truth)
+    Evidence/                 # imported/extracted material
+    Outputs/                  # generated views (never canonical)
+    Sessions/                 # ephemeral session state
+    Dashboards/               # rollup views
+```
 
-When an agent opens the repo, it reads `AGENTS.md` and `./agent-knowledge/STATUS.md`.
-If onboarding is pending, the agent inspects the project, imports evidence, and
-creates curated memory. After that, ongoing maintenance happens automatically.
+Knowledge lives **outside** the repo so it persists across branches, tools,
+and clones. The symlink gives every tool a stable `./agent-knowledge` path.
 
-### Knowledge Structure
-
-| Folder | Purpose | Rule |
-|--------|---------|------|
-| `Memory/` | Curated, durable facts | Source of truth |
-| `Evidence/` | Imported/extracted material | Not curated truth |
-| `Outputs/` | Generated views | Never canonical |
-| `Sessions/` | Temporary state | Prune aggressively |
+When an agent opens the repo it reads `AGENTS.md` and `STATUS.md`.
+If onboarding is pending, it inspects the project, imports evidence,
+and writes curated memory. After that, maintenance is automatic.
 
 ## Commands
 
 | Command | What it does |
 |---------|-------------|
-| `agent-knowledge init` | Set up a project (zero-arg default) |
-| `agent-knowledge doctor` | Validate setup and report health |
-| `agent-knowledge update` | Sync changes into the knowledge tree |
-| `agent-knowledge import` | Import repo history into Evidence/ |
-| `agent-knowledge ship` | Validate, sync, commit, push |
-| `agent-knowledge bootstrap` | Repair the memory tree |
-| `agent-knowledge setup` | Install global Cursor rules and skills |
-| `agent-knowledge global-sync` | Import safe local tooling config |
-| `agent-knowledge graphify-sync` | Import graph/discovery artifacts |
-| `agent-knowledge compact` | Compact memory notes |
-| `agent-knowledge measure-tokens` | Estimate context token savings |
+| `init` | Set up a project (zero-arg, auto-detects everything) |
+| `sync` | Push memory updates + extract git evidence |
+| `doctor` | Validate setup and report health |
+| `update` | Sync project changes into the knowledge tree |
+| `import` | Import repo history into Evidence/ |
+| `ship` | Validate, sync, commit, push |
+| `setup` | Install global Cursor rules and skills |
+| `global-sync` | Import safe local tooling config |
+| `measure-tokens` | Estimate context token savings |
 
 All write commands support `--dry-run`. Use `--json` for machine-readable output.
 
-## Custom Knowledge Home
-
-Set the environment variable to change where vaults are stored:
-
-```
-export AGENT_KNOWLEDGE_HOME=~/my-knowledge
-```
-
-Or pass it once:
-
-```
-agent-knowledge init --knowledge-home ~/my-knowledge
-```
-
 ## Multi-Tool Support
 
-`init` auto-detects which tools are present and installs the right bridge files:
+`init` detects which tools are present and installs the right bridge files:
 
-| Tool | Detection | Bridge file |
-|------|-----------|-------------|
-| Cursor | `.cursor/` exists | `.cursor/hooks.json` (always installed) |
-| Claude | `.claude/` or `CLAUDE.md` | `CLAUDE.md` |
-| Codex | `.codex/` | `.codex/AGENTS.md` |
+| Tool | Bridge file | How it works |
+|------|-------------|-------------|
+| Cursor | `.cursor/hooks.json` + `.cursor/rules/agent-knowledge.mdc` | Hook runs on save; rule loads on session start |
+| Claude | `CLAUDE.md` | Points to AGENTS.md and STATUS.md |
+| Codex | `.codex/AGENTS.md` | Points to AGENTS.md and STATUS.md |
 
-Multiple tools in the same repo work fine.
+Multiple tools in the same repo work together.
 
 ## Obsidian
 
-Open `~/agent-os/projects/<slug>/` (or the parent `~/agent-os/projects/`) as an
-Obsidian vault to browse project knowledge with backlinks and graph view.
+Open `~/agent-os/projects/<slug>/` as an Obsidian vault. The knowledge graph
+shows all memory areas, evidence, and dashboards connected through wiki-links.
+
+Enable **Graph view** in Settings > Core plugins and set
+**Files and links > Use `[[Wikilinks]]`** to ON for the best experience.
+
+## Custom Knowledge Home
+
+```bash
+export AGENT_KNOWLEDGE_HOME=~/my-knowledge
+agent-knowledge init
+```
 
 ## Development
 
-```
+```bash
 git clone <repo-url>
 cd agent-knowledge
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
-pytest tests/ -v
+python -m pytest tests/ -q
 ```

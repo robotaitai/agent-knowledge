@@ -38,7 +38,7 @@ def test_top_level_help():
 def test_version():
     r = _run("--version")
     assert r.returncode == 0
-    assert "0.0.1" in r.stdout
+    assert "0.1.1" in r.stdout
 
 
 @pytest.mark.parametrize(
@@ -56,6 +56,7 @@ def test_version():
         "compact",
         "measure-tokens",
         "setup",
+        "sync",
     ],
 )
 def test_subcommand_help(cmd: str):
@@ -220,3 +221,95 @@ def test_measure_tokens_no_args_shows_help():
     r = _run("measure-tokens")
     assert r.returncode == 0
     assert "compare" in r.stdout.lower() or "log-run" in r.stdout.lower()
+
+
+# -- sync tests ------------------------------------------------------------ #
+
+
+def test_sync_dry_run(tmp_path: Path):
+    repo = _init_repo(tmp_path, "sync-dry")
+    kh = tmp_path / "kh"
+    r = _run("init", "--repo", str(repo), "--knowledge-home", str(kh))
+    assert r.returncode == 0
+
+    # Create agent_docs/memory with a file
+    mem_dir = repo / "agent_docs" / "memory"
+    mem_dir.mkdir(parents=True)
+    (mem_dir / "MEMORY.md").write_text("---\nproject: test\n---\n# Memory\n")
+
+    r = _run("sync", "--project", str(repo), "--dry-run")
+    assert r.returncode == 0
+    assert "dry-run" in r.stderr.lower()
+
+
+def test_sync_copies_memory_branches(tmp_path: Path):
+    repo = _init_repo(tmp_path, "sync-mem")
+    kh = tmp_path / "kh"
+    r = _run("init", "--repo", str(repo), "--knowledge-home", str(kh))
+    assert r.returncode == 0
+
+    mem_dir = repo / "agent_docs" / "memory"
+    mem_dir.mkdir(parents=True)
+    (mem_dir / "stack.md").write_text("---\narea: stack\n---\n# Stack\nPython 3.9+\n")
+
+    r = _run("sync", "--project", str(repo))
+    assert r.returncode == 0
+
+    vault_stack = repo / "agent-knowledge" / "Memory" / "stack.md"
+    assert vault_stack.is_file()
+    assert "Python 3.9+" in vault_stack.read_text()
+
+
+def test_sync_extracts_git_log(tmp_path: Path):
+    repo = _init_repo(tmp_path, "sync-git")
+    kh = tmp_path / "kh"
+
+    # Create a commit so git log has output
+    (repo / "hello.txt").write_text("hello")
+    subprocess.run(["git", "add", "."], cwd=str(repo), capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-m", "initial"],
+        cwd=str(repo),
+        capture_output=True,
+        env={**__import__("os").environ, "GIT_AUTHOR_NAME": "Test", "GIT_AUTHOR_EMAIL": "t@t", "GIT_COMMITTER_NAME": "Test", "GIT_COMMITTER_EMAIL": "t@t"},
+    )
+
+    r = _run("init", "--repo", str(repo), "--knowledge-home", str(kh))
+    assert r.returncode == 0
+
+    r = _run("sync", "--project", str(repo))
+    assert r.returncode == 0
+
+    git_evidence = repo / "agent-knowledge" / "Evidence" / "raw" / "git-recent.md"
+    assert git_evidence.is_file()
+    assert "initial" in git_evidence.read_text()
+
+
+def test_sync_json_output(tmp_path: Path):
+    repo = _init_repo(tmp_path, "sync-json")
+    kh = tmp_path / "kh"
+    r = _run("init", "--repo", str(repo), "--knowledge-home", str(kh))
+    assert r.returncode == 0
+
+    r = _run("sync", "--project", str(repo), "--json")
+    assert r.returncode == 0
+    parsed = json.loads(r.stdout)
+    assert "sync" in parsed
+    assert "memory-branches" in parsed["sync"]
+
+
+def test_sync_updates_status_timestamp(tmp_path: Path):
+    repo = _init_repo(tmp_path, "sync-stamp")
+    kh = tmp_path / "kh"
+    r = _run("init", "--repo", str(repo), "--knowledge-home", str(kh))
+    assert r.returncode == 0
+
+    r = _run("sync", "--project", str(repo))
+    assert r.returncode == 0
+
+    status = (repo / "agent-knowledge" / "STATUS.md").read_text()
+    # After sync, last_project_sync should have a timestamp (not empty)
+    import re
+    m = re.search(r"last_project_sync:\s*(\S+)", status)
+    assert m is not None, "last_project_sync should be stamped"
+    assert m.group(1) != ""

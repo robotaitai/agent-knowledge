@@ -100,8 +100,15 @@ def init(
                     click.echo(action, err=True)
 
     if not json_mode:
+        prompt = "Read AGENTS.md and ./agent-knowledge/STATUS.md, then onboard this project."
+        border = "+" + "-" * (len(prompt) + 2) + "+"
         click.echo("", err=True)
-        click.echo("Ready. Open your agent in this repo.", err=True)
+        click.secho("Ready. Open your agent and send:", bold=True, err=True)
+        click.echo("", err=True)
+        click.secho(border, fg="cyan", err=True)
+        click.secho(f"| {prompt} |", fg="cyan", bold=True, err=True)
+        click.secho(border, fg="cyan", err=True)
+        click.echo("", err=True)
 
 
 def _sanitize_slug(name: str) -> str:
@@ -110,6 +117,45 @@ def _sanitize_slug(name: str) -> str:
     slug = name.lower().strip()
     slug = re.sub(r"[^a-z0-9]+", "-", slug)
     return slug.strip("-")
+
+
+# -- sync ------------------------------------------------------------------ #
+
+
+@main.command()
+@click.option("--project", default=".", type=click.Path(exists=True), help="Project repo root.")
+@click.option("--dry-run", is_flag=True, help="Preview changes without writing.")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON only.")
+def sync(project: str, dry_run: bool, json_mode: bool) -> None:
+    """Sync memory branches, roll up sessions, and extract git evidence.
+
+    \b
+    Steps:
+      1. Copy agent_docs/memory/*.md -> agent-knowledge/Memory/ (newer only)
+      2. Scan Sessions/ and rebuild Dashboards/session-rollup.md
+      3. Extract recent git log into Evidence/raw/git-recent.md
+      4. Update last_project_sync in STATUS.md
+    """
+    import json as json_mod
+
+    from agent_knowledge.runtime.sync import run_sync
+
+    repo_path = Path(project).resolve()
+    results = run_sync(repo_path, dry_run=dry_run)
+
+    if json_mode:
+        click.echo(json_mod.dumps({"sync": results}, indent=2))
+    else:
+        for step, actions in results.items():
+            click.echo(f"[{step}]", err=True)
+            for action in actions:
+                click.echo(action, err=True)
+            click.echo("", err=True)
+
+        if dry_run:
+            click.echo("(dry-run -- no changes written)", err=True)
+        else:
+            click.secho("Sync complete.", bold=True, err=True)
 
 
 # -- bootstrap ------------------------------------------------------------- #
