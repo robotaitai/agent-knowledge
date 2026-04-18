@@ -1,7 +1,7 @@
 ---
 note_type: durable-branch
 area: integrations
-updated: 2026-04-12
+updated: 2026-04-13
 tags:
   - agent-knowledge
   - memory
@@ -22,24 +22,37 @@ Multi-tool detection and bridge file installation for Cursor, Claude, and Codex.
 
 Called by [[cli#init (zero-arg)|init]] via `detect()` then `install_all()`.
 
+**As of 0.2.5**: Cursor and Claude are both first-class. Detection table updated:
+
+| Tool | Detection | Always installed? |
+|------|-----------|-------------------|
+| Cursor | `.cursor/` exists | Yes |
+| Claude | `.claude/` exists OR `CLAUDE.md` exists | Yes (always, like Cursor) |
+| Codex | `.codex/` exists | Only if detected |
+
 ## Bridge Files
 
-### Cursor (primary runtime)
+### Cursor (first-class)
 - `.cursor/hooks.json` -- **4 hooks**: `post-write` (update), `session-start` (sync), `stop` (sync), `preCompact` (sync)
 - `.cursor/rules/agent-knowledge.mdc` -- `alwaysApply` rule: knowledge layers table, onboarding flow, `/memory-update` reference
-- `.cursor/commands/memory-update.md` -- `/memory-update` slash command: runs sync + reviews work + writes Memory
-- `.cursor/commands/system-update.md` -- `/system-update` slash command: runs refresh-system + reports
+- `.cursor/commands/memory-update.md` -- `/memory-update` slash command
+- `.cursor/commands/system-update.md` -- `/system-update` slash command
 
-Rule content is **inlined as `_CURSOR_RULE` in `integrations.py`** (no separate template file — refresh.py falls back to this constant if template file absent).
+Rule content is **inlined as `_CURSOR_RULE` in `integrations.py`** (no separate template file — refresh.py falls back to this constant if absent).
 
 Constants in `integrations.py`:
 - `CURSOR_EXPECTED_HOOK_EVENTS = {"session-start", "post-write", "stop", "preCompact"}`
 - `CURSOR_EXPECTED_COMMANDS = {"memory-update.md", "system-update.md"}`
 
-`check_cursor_integration(repo_root)` in `refresh.py` validates all 3 components (rule, hooks, commands) and is called by `doctor`.
+`check_cursor_integration(repo_root)` in `refresh.py` validates all 3 components and is called by `doctor`.
 
-### Claude
-- `CLAUDE.md` at project root -- directs to `AGENTS.md` and [[STATUS]]
+### Claude Code (first-class, added 0.2.5)
+- `.claude/settings.json` -- hooks: SessionStart (sync), Stop (sync), PreCompact (sync)
+- `.claude/CLAUDE.md` -- runtime contract: knowledge layers, onboarding flow, `/memory-update` reference
+- `.claude/commands/memory-update.md` -- `/memory-update` slash command
+- `.claude/commands/system-update.md` -- `/system-update` slash command
+
+`check_claude_integration(repo_root)` in `refresh.py` mirrors Cursor's health check. Called by `doctor`.
 
 ### Codex
 - `.codex/AGENTS.md` -- directs to root `AGENTS.md` and [[STATUS]]

@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "agent-knowledge sync --project <repo-path>"
+            "command": "agent-knowledge sync --project <repo-path> && agent-knowledge refresh-system --project <repo-path>"
           }
         ]
       }

@@ -836,6 +836,100 @@ def backfill_history(project: str, dry_run: bool, json_mode: bool, force: bool) 
     click.echo("", err=True)
 
 
+# -- absorb ---------------------------------------------------------------- #
+
+
+@main.command("absorb")
+@click.option("--project", default=".", type=click.Path(exists=True), help="Project repo root.")
+@click.option("--dry-run", is_flag=True, help="Preview what would be imported without writing.")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON summary only.")
+@click.option("--no-decisions", is_flag=True, help="Skip parsing ADR/decision files into decisions.md.")
+def absorb(project: str, dry_run: bool, json_mode: bool, no_decisions: bool) -> None:
+    """Absorb existing project docs and knowledge artifacts into the vault.
+
+    Scans the project for documentation, architecture notes, ADRs, changelogs,
+    and similar knowledge-bearing files. Copies them into Evidence/imports/ as
+    non-canonical evidence, parses any decision/ADR records into decisions.md,
+    and generates Outputs/absorb-manifest.md for agent review.
+
+    The agent should then read the manifest and promote relevant content to
+    Memory/ branches. This command does the mechanical ingestion; curation
+    remains the agent's responsibility.
+
+    \b
+    Sources discovered:
+      - Root-level docs: ARCHITECTURE.md, CHANGELOG.md, DESIGN.md, etc.
+      - docs/, documentation/, wiki/ directories
+      - adr/, decisions/, docs/adr/ directories (also parsed as ADRs)
+      - Respects .agentknowledgeignore
+
+    \b
+    Outputs:
+      - Evidence/imports/<file>.md  -- non-canonical copies with metadata
+      - Memory/decisions/decisions.md  -- parsed ADR entries appended
+      - Outputs/absorb-manifest.md  -- manifest listing all imports
+      - History/events.ndjson  -- absorb event recorded
+    """
+    from agent_knowledge.runtime.absorb import run_absorb
+
+    repo_path = Path(project).resolve()
+    vault_dir = repo_path / "agent-knowledge"
+
+    if not vault_dir.exists():
+        if json_mode:
+            click.echo(
+                __import__("json").dumps({"error": "agent-knowledge vault not found; run: agent-knowledge init"}),
+                err=False,
+            )
+        else:
+            click.secho("Error: agent-knowledge vault not found. Run: agent-knowledge init", fg="red", err=True)
+        raise SystemExit(1)
+
+    if not json_mode:
+        click.echo(f"Absorbing project knowledge: {repo_path}", err=True)
+        if dry_run:
+            click.echo("(dry-run -- no files will be written)", err=True)
+
+    result = run_absorb(
+        repo_path,
+        vault_dir,
+        project_slug=repo_path.name,
+        dry_run=dry_run,
+        include_decisions=not no_decisions,
+    )
+
+    if json_mode:
+        import json as _json
+        summary = {k: v for k, v in result.items() if k != "results"}
+        click.echo(_json.dumps(summary))
+        return
+
+    imported = result["imported"]
+    already = result["already_present"]
+    decisions = result["decisions_parsed"]
+    found = result["sources_found"]
+    manifest = result["manifest"]
+
+    if found == 0:
+        click.echo("  No knowledge sources found in project.", err=True)
+        click.echo("  Looked for: docs/, adr/, decisions/, ARCHITECTURE.md, CHANGELOG.md, etc.", err=True)
+        return
+
+    click.echo(f"  Found:     {found} source files", err=True)
+    click.echo(f"  Imported:  {imported} new files -> Evidence/imports/", err=True)
+    if already:
+        click.echo(f"  Skipped:   {already} already present", err=True)
+    if decisions:
+        click.echo(f"  Decisions: {decisions} ADR entries parsed -> Memory/decisions/decisions.md", err=True)
+    if not dry_run:
+        click.echo(f"  Manifest:  {manifest}", err=True)
+        click.echo("", err=True)
+        click.echo(
+            "Next: ask your agent to read Outputs/absorb-manifest.md and update Memory/ branches.",
+            err=True,
+        )
+
+
 # -- refresh-system -------------------------------------------------------- #
 
 

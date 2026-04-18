@@ -1,7 +1,7 @@
 ---
 note_type: durable-branch
 area: packaging
-updated: 2026-04-12
+updated: 2026-04-13
 tags:
   - agent-knowledge
   - memory
@@ -30,7 +30,7 @@ See [[architecture#Path Resolution]] for how the code finds these at runtime.
 
 ## Version
 
-Current: **0.2.3**. PyPI package name: `agent-knowledge-cli`. See [[deployments]].
+Current: **0.2.5**. PyPI package name: `agent-knowledge-cli`. See [[deployments]].
 
 Install: `pip install agent-knowledge-cli`. Command: `agent-knowledge`.
 

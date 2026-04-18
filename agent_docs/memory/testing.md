@@ -1,6 +1,6 @@
 ---
 area: testing
-updated: 2026-04-12
+updated: 2026-04-13
 ---
 
 # Testing
@@ -11,7 +11,7 @@ Test strategy for packaging validation and CLI correctness.
 ## Current State
 
 - Framework: `pytest` (dev dependency).
-- **145 tests** across 2 files: `tests/test_packaging.py` and `tests/test_cli.py`.
+- **162 tests** across 2 files: `tests/test_packaging.py` and `tests/test_cli.py`.
 - CI: GitHub Actions (`.github/workflows/ci.yml`) -- ubuntu-latest + macos-latest, Python 3.10/3.12/3.13.
   - `test` job: runs `pytest` with editable install.
   - `build` job: builds wheel, installs from wheel, runs CLI smoke tests (`--help`, `--version`, subcommand `--help`).
@@ -64,6 +64,7 @@ Test strategy for packaging validation and CLI correctness.
 - 2026-04-10: Added 10 new tests for graph view in site export (total: 118).
 - 2026-04-11: Added 9 new tests for backfill-history / history layer, +1 for new subcommand help (total: 128).
 - 2026-04-12: Added 15 new cursor-integration tests (commands install, hook events, check_cursor_integration, rule content) + 2 packaging tests (total: 145).
+- 2026-04-13: Added 17 new Claude integration tests (settings.json, commands, check_claude_integration, health checks) (total: 162).
 
 ## Open Questions
 

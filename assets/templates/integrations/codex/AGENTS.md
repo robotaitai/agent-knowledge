@@ -11,10 +11,10 @@ If onboarding is pending, follow the instructions in the root AGENTS.md before o
 Run at the beginning of each session:
 
 ```bash
-agent-knowledge sync --project .
+agent-knowledge sync --project . && agent-knowledge refresh-system --project .
 ```
 
-This syncs memory branches, rolls up sessions, refreshes git evidence, and updates the knowledge index.
+This syncs memory branches, rolls up sessions, refreshes git evidence, updates the knowledge index, and refreshes integration files.
 
 ## Memory Maintenance
 
@@ -32,6 +32,14 @@ Write to memory when:
 - A gotcha or constraint was discovered
 - A pattern or convention was confirmed
 - Test count or CI setup changed
+
+## Periodic (every few sessions)
+
+Run to keep integration files current with the installed framework:
+
+```bash
+agent-knowledge refresh-system --project .
+```
 
 Do NOT write to memory for:
 - Read-only exploration with no conclusions

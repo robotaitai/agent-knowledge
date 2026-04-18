@@ -91,6 +91,13 @@ Site views: Overview, Tree/Ontology, Note/Detail, Evidence, Graph (force-directe
 - `is_stale()` used by `doctor` command for version staleness warning
 - Idempotent: skips files already at current version
 
+## Periodic Update Mechanics (added 2026-04-13)
+
+- `session-start` hook runs `sync && refresh-system` — integration files self-heal on every session open
+- `_CURSOR_RULE` and `CLAUDE.md` template include explicit "Periodic (every few sessions): run /system-update" instruction
+- Rule also says "After meaningful work: run /memory-update" as a session-end habit
+- Gotcha: `_refresh_cursor_rule` compares installed rule against `_CURSOR_RULE` constant — if `.pyc` is stale (system Python shadowing venv), comparison may report false "up-to-date"; fix by forcing reinstall or writing rule directly
+
 ## Capture Layer
 
 - `Evidence/captures/` — YAML event files (timestamp, source_tool, event_type, touched_branches)

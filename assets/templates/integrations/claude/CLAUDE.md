@@ -24,6 +24,10 @@ All knowledge lives in `./agent-knowledge/` (symlink to external vault).
 ## After meaningful work
 
 - Write confirmed facts to `./agent-knowledge/Memory/<branch>.md`
-- Run `/memory-update` or `agent-knowledge sync --project .`
+- Run `/memory-update` — sync, update branches, summarize what changed
+
+## Periodic (every few sessions)
+
+- Run `/system-update` to refresh integration files to the latest framework version
 
 Keep ontology small and project-native. Do not force generic templates.

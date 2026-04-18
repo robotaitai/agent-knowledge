@@ -10,7 +10,7 @@
     {
       "name": "project-knowledge-session-start",
       "event": "session-start",
-      "command": "agent-knowledge sync --project <repo-path>"
+      "command": "agent-knowledge sync --project <repo-path> && agent-knowledge refresh-system --project <repo-path>"
     },
     {
       "name": "project-knowledge-stop",

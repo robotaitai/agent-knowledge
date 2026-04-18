@@ -11,13 +11,13 @@ from .paths import get_assets_dir
 CURSOR_EXPECTED_HOOK_EVENTS = {"session-start", "post-write", "stop", "preCompact"}
 
 # Expected Cursor command files.
-CURSOR_EXPECTED_COMMANDS = {"memory-update.md", "system-update.md"}
+CURSOR_EXPECTED_COMMANDS = {"memory-update.md", "system-update.md", "absorb.md"}
 
 # Expected Claude hook events — used by integration health checks.
 CLAUDE_EXPECTED_HOOK_EVENTS = {"SessionStart", "Stop", "PreCompact"}
 
 # Expected Claude command files.
-CLAUDE_EXPECTED_COMMANDS = {"memory-update.md", "system-update.md"}
+CLAUDE_EXPECTED_COMMANDS = {"memory-update.md", "system-update.md", "absorb.md"}
 
 TOOLS = ("cursor", "claude", "codex")
 
@@ -73,7 +73,11 @@ All knowledge lives in `./agent-knowledge/` (symlink to external vault).
 ## After meaningful work
 
 - Write confirmed facts to `./agent-knowledge/Memory/<branch>.md`
-- Run `/memory-update` or `agent-knowledge sync --project .`
+- Run `/memory-update` — sync, update branches, summarize what changed
+
+## Periodic (every few sessions)
+
+- Run `/system-update` to refresh integration files to the latest framework version
 
 Keep ontology small and project-native. Do not force generic templates.
 """

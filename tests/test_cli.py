@@ -68,6 +68,7 @@ def test_version():
         "export-canvas",
         "refresh-system",
         "backfill-history",
+        "absorb",
     ],
 )
 def test_subcommand_help(cmd: str):
@@ -1955,3 +1956,152 @@ def test_smoke_init_doctor_with_claude(tmp_path: Path):
     assert r.returncode == 0
     data = json.loads(r.stdout)
     assert data["action"] == "up-to-date"
+
+
+# ---------------------------------------------------------------------------
+# absorb tests
+# ---------------------------------------------------------------------------
+
+
+def _init_with_vault(tmp_path: Path, name: str = "absorb-repo") -> Path:
+    """Init a temp repo with a vault (needed for absorb tests)."""
+    kh = tmp_path / "agent-os" / "projects"
+    kh.mkdir(parents=True)
+    repo = _init_repo(tmp_path, name)
+    r = _run("init", "--repo", str(repo), "--knowledge-home", str(kh))
+    assert r.returncode == 0, r.stderr
+    return repo
+
+
+def test_absorb_help():
+    r = _run("absorb", "--help")
+    assert r.returncode == 0
+    assert "Evidence/imports" in r.stdout
+
+
+def test_absorb_dry_run_no_mutation(tmp_path: Path):
+    repo = _init_with_vault(tmp_path)
+    # Add a doc file
+    (repo / "ARCHITECTURE.md").write_text("# Architecture\n\nThis is the architecture.\n")
+    r = _run("absorb", "--project", str(repo), "--dry-run")
+    assert r.returncode == 0
+    # Dry run must not create files
+    imports_dir = repo / "agent-knowledge" / "Evidence" / "imports"
+    imported = list(imports_dir.glob("ARCHITECTURE*.md")) if imports_dir.exists() else []
+    assert imported == [], "dry-run must not create files"
+
+
+def test_absorb_imports_docs(tmp_path: Path):
+    repo = _init_with_vault(tmp_path)
+    (repo / "ARCHITECTURE.md").write_text("# Architecture\n\nDesign overview.\n")
+    (repo / "CHANGELOG.md").write_text("# Changelog\n\n## v1.0.0\n- initial release\n")
+    r = _run("absorb", "--project", str(repo))
+    assert r.returncode == 0
+    imports_dir = repo / "agent-knowledge" / "Evidence" / "imports"
+    assert imports_dir.is_dir()
+    files = list(imports_dir.glob("*.md"))
+    assert len(files) >= 2
+
+
+def test_absorb_imports_have_metadata_header(tmp_path: Path):
+    repo = _init_with_vault(tmp_path)
+    (repo / "ARCHITECTURE.md").write_text("# Architecture\n\nDetails here.\n")
+    _run("absorb", "--project", str(repo))
+    imports_dir = repo / "agent-knowledge" / "Evidence" / "imports"
+    arch_files = list(imports_dir.glob("*ARCHITECTURE*"))
+    assert arch_files, "ARCHITECTURE.md should be imported"
+    content = arch_files[0].read_text()
+    assert "canonical: false" in content
+    assert "source:" in content
+
+
+def test_absorb_docs_dir(tmp_path: Path):
+    repo = _init_with_vault(tmp_path)
+    docs = repo / "docs"
+    docs.mkdir()
+    (docs / "design.md").write_text("# Design\n\nDetails.\n")
+    (docs / "api.md").write_text("# API\n\nEndpoints.\n")
+    r = _run("absorb", "--project", str(repo))
+    assert r.returncode == 0
+    imports_dir = repo / "agent-knowledge" / "Evidence" / "imports"
+    files = list(imports_dir.glob("*.md"))
+    assert any("design" in f.name for f in files)
+    assert any("api" in f.name for f in files)
+
+
+def test_absorb_adr_parsed_into_decisions(tmp_path: Path):
+    repo = _init_with_vault(tmp_path)
+    adr_dir = repo / "adr"
+    adr_dir.mkdir()
+    (adr_dir / "001-use-postgres.md").write_text(
+        "# ADR-001: Use PostgreSQL\n\n## Status\n\nAccepted\n\n## Context\n\nWe need a relational database.\n\n## Decision\n\nUse PostgreSQL.\n"
+    )
+    r = _run("absorb", "--project", str(repo))
+    assert r.returncode == 0
+    decisions_path = repo / "agent-knowledge" / "Memory" / "decisions" / "decisions.md"
+    assert decisions_path.is_file()
+    content = decisions_path.read_text()
+    assert "adr/001-use-postgres.md" in content
+
+
+def test_absorb_idempotent(tmp_path: Path):
+    repo = _init_with_vault(tmp_path)
+    (repo / "ARCHITECTURE.md").write_text("# Architecture\n\nStable.\n")
+    _run("absorb", "--project", str(repo))
+    _run("absorb", "--project", str(repo))
+    imports_dir = repo / "agent-knowledge" / "Evidence" / "imports"
+    arch_files = list(imports_dir.glob("*ARCHITECTURE*"))
+    assert len(arch_files) == 1, "idempotent: file should not be duplicated"
+
+
+def test_absorb_manifest_created(tmp_path: Path):
+    repo = _init_with_vault(tmp_path)
+    (repo / "ARCHITECTURE.md").write_text("# Arch\n\nContent.\n")
+    r = _run("absorb", "--project", str(repo))
+    assert r.returncode == 0
+    manifest = repo / "agent-knowledge" / "Outputs" / "absorb-manifest.md"
+    assert manifest.is_file()
+    content = manifest.read_text()
+    assert "ARCHITECTURE.md" in content
+    assert "canonical: false" in content
+
+
+def test_absorb_manifest_not_in_memory(tmp_path: Path):
+    repo = _init_with_vault(tmp_path)
+    (repo / "ARCHITECTURE.md").write_text("# Arch\n\nContent.\n")
+    _run("absorb", "--project", str(repo))
+    memory_dir = repo / "agent-knowledge" / "Memory"
+    md_files = list(memory_dir.rglob("absorb-manifest.md"))
+    assert not md_files, "absorb-manifest.md must not appear in Memory/"
+
+
+def test_absorb_json_mode(tmp_path: Path):
+    repo = _init_with_vault(tmp_path)
+    (repo / "ARCHITECTURE.md").write_text("# Arch\n\nContent.\n")
+    r = _run("absorb", "--project", str(repo), "--json")
+    assert r.returncode == 0
+    data = json.loads(r.stdout)
+    assert "sources_found" in data
+    assert "imported" in data
+    assert "decisions_parsed" in data
+
+
+def test_absorb_no_vault_exits_nonzero(tmp_path: Path):
+    repo = _init_repo(tmp_path, "bare-repo")
+    r = _run("absorb", "--project", str(repo))
+    assert r.returncode != 0
+
+
+def test_absorb_skips_vault_files(tmp_path: Path):
+    repo = _init_with_vault(tmp_path)
+    # Write a file inside the vault -- should not be re-imported
+    vault = repo / "agent-knowledge"
+    (vault / "Memory" / "MEMORY.md").write_text("# Memory\n\nContent.\n")
+    r = _run("absorb", "--project", str(repo), "--json")
+    assert r.returncode == 0
+    data = json.loads(r.stdout)
+    # Nothing from vault should appear as a new import
+    imports_dir = vault / "Evidence" / "imports"
+    if imports_dir.exists():
+        files = [f.name for f in imports_dir.glob("*.md")]
+        assert not any("MEMORY" in f for f in files)

@@ -104,7 +104,7 @@ branch-note convention, internal links. But everything works without it too.
 
 ### Session lifecycle
 
-Hooks fire automatically -- the agent syncs memory at the start of every session
+Hooks fire automatically -- the agent syncs memory at the start of every session    
 and captures state at the end, with no manual intervention:
 
 | Event | Claude Code | Cursor | What runs |
