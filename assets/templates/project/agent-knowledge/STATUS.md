@@ -9,8 +9,6 @@ last_bootstrap:
 onboarding: pending
 last_backfill_import:
 last_project_sync:
-last_global_sync:
-last_graph_sync:
 last_compaction:
 last_validation:
 last_validation_result: unknown
@@ -32,8 +30,6 @@ last_doctor_result: unknown
 - Last bootstrap: `not-yet`
 - Last backfill/import: `not-yet`
 - Last project sync: `not-yet`
-- Last global sync: `not-yet`
-- Last graph sync: `not-yet`
 - Last compaction: `not-yet`
 - Last validation: `not-yet` (`unknown`)
 - Last doctor: `not-yet` (`unknown`)

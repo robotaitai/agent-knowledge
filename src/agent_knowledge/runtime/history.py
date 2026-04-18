@@ -492,6 +492,24 @@ It is a non-canonical summary — not a source of truth.
 """
 
 
+def _update_status_backfill(repo_root: Path, vault_dir: Path) -> None:
+    """Write today's date to last_backfill_import in STATUS.md."""
+    status_path = vault_dir / "STATUS.md"
+    if not status_path.is_file():
+        return
+    today = datetime.date.today().isoformat()
+    content = status_path.read_text()
+    import re as _re
+    updated = _re.sub(
+        r"^(last_backfill_import:\s*).*$",
+        lambda m: f"{m.group(1)}{today}",
+        content,
+        flags=_re.MULTILINE,
+    )
+    if updated != content:
+        status_path.write_text(updated)
+
+
 def run_backfill(
     repo_root: Path,
     vault_dir: Path,
@@ -620,6 +638,10 @@ def run_backfill(
         events = read_events(vault_dir, limit=20)
         _rebuild_history_md(vault_dir, project_slug, events)
         changes.append("history.md")
+
+    # --- Update last_backfill_import in STATUS.md ---
+    if not dry_run:
+        _update_status_backfill(repo_root, vault_dir)
 
     action: str
     if dry_run:
