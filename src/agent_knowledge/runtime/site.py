@@ -323,8 +323,6 @@ def build_site_data(
     memory_notes = [n for n in all_notes if n["folder"] == "Memory"]
     evidence_notes = [n for n in all_notes if n["folder"] == "Evidence"]
     output_notes = [n for n in all_notes if n["folder"] == "Outputs"]
-    session_notes = [n for n in all_notes if n["folder"] == "Sessions"]
-
     # --- Branches: Memory entry notes (excluding decisions/) ---
     branch_metas = [
         n for n in memory_notes
@@ -624,7 +622,6 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
   --mem-bg:#031d44;--mem-fg:#79c0ff;--mem-border:#1f6feb;
   --ev-bg:#1b0045;--ev-fg:#d2a8ff;--ev-border:#6e40c9;
   --out-bg:#2d1b00;--out-fg:#e3b341;--out-border:#9e6a03;
-  --ses-bg:#1a0000;--ses-fg:#ff7b72;--ses-border:#b62324;
   --ok:#3fb950;--warn-bg:#3a2000;--warn-fg:#d29922;
   --radius:8px;--radius-sm:5px;
 }
@@ -781,7 +778,6 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
 .badge-Memory{background:var(--mem-bg);color:var(--mem-fg);border:1px solid var(--mem-border)}
 .badge-Evidence{background:var(--ev-bg);color:var(--ev-fg);border:1px solid var(--ev-border)}
 .badge-Outputs{background:var(--out-bg);color:var(--out-fg);border:1px solid var(--out-border)}
-.badge-Sessions{background:var(--ses-bg);color:var(--ses-fg);border:1px solid var(--ses-border)}
 .badge-profile{background:var(--surface-2);color:var(--muted);border:1px solid var(--border);font-size:9px}
 .badge-onboarding-ok{background:#0d2b0d;color:var(--ok);border:1px solid #1a4d1a;font-size:9px}
 .badge-onboarding-pending{background:var(--warn-bg);color:var(--warn-fg);border:1px solid var(--warn-fg);font-size:9px}

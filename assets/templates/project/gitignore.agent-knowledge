@@ -7,7 +7,6 @@
 
 # Usually ignore noisy generated or transient knowledge branches.
 agent-knowledge/Evidence/
-agent-knowledge/Sessions/
 agent-knowledge/Outputs/
 agent-knowledge/.obsidian/workspace*.json
 agent-knowledge/.obsidian/cache/

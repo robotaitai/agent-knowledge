@@ -43,7 +43,6 @@ _LOCAL_GITIGNORE_BLOCK = """\
 # Curated knowledge (Memory/, History/, Evidence/imports/, Dashboards/) IS tracked.
 agent-knowledge/Evidence/raw/
 agent-knowledge/Evidence/captures/
-agent-knowledge/Sessions/
 agent-knowledge/Outputs/site/
 agent-knowledge/Outputs/graph.json
 agent-knowledge/Outputs/knowledge-index.json
@@ -106,7 +105,7 @@ def init(
                 ./agent-knowledge is a symlink to that folder.
       --local   Knowledge lives in ./agent-knowledge/ inside the repo (git-tracked).
                 ~/agent-os/projects/<slug>/ is a symlink back to the repo folder.
-                Noisy subfolders (Evidence/raw, Sessions, captures) are added
+                Noisy subfolders (Evidence/raw, Evidence/captures) are added
                 to .gitignore automatically.
     """
     from agent_knowledge.runtime.integrations import detect, install_all
@@ -241,8 +240,7 @@ def sync(project: str, dry_run: bool, json_mode: bool) -> None:
     \b
     Steps:
       1. Copy agent_docs/memory/*.md -> agent-knowledge/Memory/ (newer only)
-      2. Scan Sessions/ and rebuild Dashboards/session-rollup.md
-      3. Extract recent git log into Evidence/raw/git-recent.md
+      2. Extract recent git log into Evidence/raw/git-recent.md
       4. Update last_project_sync in STATUS.md
     """
     import json as json_mod
@@ -996,7 +994,7 @@ def refresh_system(project: str, dry_run: bool, json_mode: bool, force: bool) ->
     Updates bridge files (AGENTS.md header, Cursor hooks, CLAUDE.md, Codex config)
     and metadata version markers (STATUS.md, .agent-project.yaml).
 
-    Memory/, Evidence/, Sessions/, and project-curated content are never touched.
+    Memory/, Evidence/, and project-curated content are never touched.
     Safe to run after `pip install -U agent-knowledge-cli`.
 
     \b

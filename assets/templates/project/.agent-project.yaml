@@ -17,7 +17,6 @@ knowledge:
   memory_root: ./agent-knowledge/Memory/MEMORY.md
   evidence_raw: ./agent-knowledge/Evidence/raw
   evidence_imports: ./agent-knowledge/Evidence/imports
-  sessions_root: ./agent-knowledge/Sessions
   outputs_root: ./agent-knowledge/Outputs
   dashboards_root: ./agent-knowledge/Dashboards
   obsidian_mode: lightweight

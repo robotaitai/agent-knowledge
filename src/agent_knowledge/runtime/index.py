@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any, Sequence
 
 # Folders in priority order for retrieval.
-_FOLDER_ORDER = ["Memory", "Evidence", "Outputs", "Sessions"]
+_FOLDER_ORDER = ["Memory", "Evidence", "Outputs"]
 _CANONICAL_FOLDERS = {"Memory"}
 
 # Branch entry note pattern: <topic>/<topic>.md

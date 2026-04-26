@@ -271,7 +271,6 @@ for dir in \
     "$EVIDENCE_RAW_DIR" \
     "$EVIDENCE_IMPORTS_DIR" \
     "$EVIDENCE_CAPTURES_DIR" \
-    "$SESSIONS_DIR" \
     "$OUTPUTS_DIR" \
     "$DASHBOARDS_DIR" \
     "$LOCAL_TEMPLATES_DIR" \
@@ -287,7 +286,6 @@ copy_static_template "$PROJECT_TEMPLATE_DIR/Evidence/README.md" "$EVIDENCE_DIR/R
 copy_static_template "$PROJECT_TEMPLATE_DIR/Evidence/raw/README.md" "$EVIDENCE_RAW_DIR/README.md" "agent-knowledge/Evidence/raw/README.md"
 copy_static_template "$PROJECT_TEMPLATE_DIR/Evidence/imports/README.md" "$EVIDENCE_IMPORTS_DIR/README.md" "agent-knowledge/Evidence/imports/README.md"
 copy_static_template "$PROJECT_TEMPLATE_DIR/Evidence/captures/README.md" "$EVIDENCE_CAPTURES_DIR/README.md" "agent-knowledge/Evidence/captures/README.md"
-copy_static_template "$PROJECT_TEMPLATE_DIR/Sessions/README.md" "$SESSIONS_DIR/README.md" "agent-knowledge/Sessions/README.md"
 copy_static_template "$PROJECT_TEMPLATE_DIR/Outputs/README.md" "$OUTPUTS_DIR/README.md" "agent-knowledge/Outputs/README.md"
 copy_static_template "$PROJECT_TEMPLATE_DIR/Templates/README.md" "$LOCAL_TEMPLATES_DIR/README.md" "agent-knowledge/Templates/README.md"
 copy_static_template "$PROJECT_TEMPLATE_DIR/.obsidian/README.md" "$OBSIDIAN_DIR/README.md" "agent-knowledge/.obsidian/README.md"
@@ -331,11 +329,6 @@ render_dashboard_note \
     "$DASHBOARD_TEMPLATES_DIR/project-overview.template.md" \
     "$DASHBOARDS_DIR/project-overview.md" \
     "agent-knowledge/Dashboards/project-overview.md"
-render_dashboard_note \
-    "$DASHBOARD_TEMPLATES_DIR/session-rollup.template.md" \
-    "$DASHBOARDS_DIR/session-rollup.md" \
-    "agent-knowledge/Dashboards/session-rollup.md"
-
 # ---------------------------------------------------------------------------
 # Memory/MEMORY.md (minimal -- agent infers branches later)
 # ---------------------------------------------------------------------------

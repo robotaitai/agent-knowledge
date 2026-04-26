@@ -1,10 +1,11 @@
-"""Sync logic: memory branch sync, session rollup, git-log evidence extraction.
+"""Sync logic: memory branch sync, git-log evidence extraction.
 
 Also integrates:
 - Capture: each sync event is recorded in Evidence/captures/ as a lightweight
   evidence item (not curated memory, never auto-promoted).
 - Index: Outputs/knowledge-index.json and .md are regenerated on each sync
   so agents and humans always have a current compact catalog.
+- History: incremental backfill keeps History/events.ndjson and history.md current.
 """
 
 from __future__ import annotations
@@ -94,81 +95,9 @@ def sync_memory_branches(
     return actions
 
 
-# ---------------------------------------------------------------------------
-# 2. Session rollup: Sessions/*.md -> Dashboards/session-rollup.md
-# ---------------------------------------------------------------------------
-
-_FRONTMATTER_RE = re.compile(r"^---\s*\n.*?\n---\s*\n", re.DOTALL)
-
-
-def rollup_sessions(
-    repo: Path,
-    *,
-    dry_run: bool = False,
-    max_sessions: int = 10,
-) -> list[str]:
-    """Scan Sessions/ for .md files, append summaries to session-rollup.md."""
-    sessions_dir = repo / "agent-knowledge" / "Sessions"
-    rollup_path = repo / "agent-knowledge" / "Dashboards" / "session-rollup.md"
-    actions: list[str] = []
-
-    if not sessions_dir.is_dir():
-        actions.append("skip: Sessions/ not found")
-        return actions
-
-    session_files = sorted(
-        [f for f in sessions_dir.glob("*.md") if f.name != "README.md"],
-        key=lambda f: f.stat().st_mtime,
-        reverse=True,
-    )[:max_sessions]
-
-    if not session_files:
-        actions.append("  no session files to roll up")
-        return actions
-
-    entries: list[str] = []
-    for sf in session_files:
-        body = sf.read_text(errors="replace")
-        body = _FRONTMATTER_RE.sub("", body).strip()
-        title_match = re.match(r"^#\s+(.+)", body)
-        title = title_match.group(1) if title_match else sf.stem
-        first_lines = "\n".join(body.split("\n")[:5])
-        entries.append(f"### {title}\n\n_Source: {sf.name}_\n\n{first_lines}\n")
-
-    rollup_body = f"""\
----
-note_type: dashboard
-dashboard: session-rollup
-project: {repo.name}
-last_updated: {_today()}
-tags:
-  - {repo.name}
-  - dashboard
----
-
-# Session Rollup
-
-## Recent Sessions ({len(entries)} files)
-
-{"---".join(entries)}
-
-## Next Review
-
-- Review recent sessions before the next compaction or handoff.
-"""
-
-    if dry_run:
-        actions.append(f"  [dry-run] would update: Dashboards/session-rollup.md ({len(entries)} sessions)")
-    else:
-        rollup_path.parent.mkdir(parents=True, exist_ok=True)
-        rollup_path.write_text(rollup_body)
-        actions.append(f"  updated: Dashboards/session-rollup.md ({len(entries)} sessions)")
-
-    return actions
-
 
 # ---------------------------------------------------------------------------
-# 3. Git log extraction -> Evidence/raw/git-recent.md
+# 2. Git log extraction -> Evidence/raw/git-recent.md
 # ---------------------------------------------------------------------------
 
 def extract_git_log(
@@ -292,7 +221,7 @@ def _record_sync_capture(
         event_type="sync",
         source_tool="cli",
         project_slug=slug,
-        summary="Project sync: memory branches updated, session rollup rebuilt, git evidence extracted.",
+        summary="Project sync: memory branches updated, git evidence extracted, history updated.",
         touched_branches=touched,
         dry_run=dry_run,
     )
@@ -361,7 +290,6 @@ def run_sync(
     results: dict[str, list[str]] = {}
 
     results["memory-branches"] = sync_memory_branches(repo, dry_run=dry_run)
-    results["session-rollup"] = rollup_sessions(repo, dry_run=dry_run)
     results["git-evidence"] = extract_git_log(repo, dry_run=dry_run)
     results["history"] = _update_history(repo, dry_run=dry_run)
     results["capture"] = _record_sync_capture(

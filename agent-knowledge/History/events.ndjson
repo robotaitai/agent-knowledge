@@ -72,3 +72,4 @@
 {"ts":"2026-04-23T20:30:15Z","type":"integration_cursor","tool":"cli","slug":"agent-knowledge","summary":"cursor integration detected"}
 {"ts":"2026-04-23T20:30:15Z","type":"integration_claude","tool":"cli","slug":"agent-knowledge","summary":"claude integration detected"}
 {"ts":"2026-04-23T20:30:15Z","type":"backfill","tool":"cli","slug":"agent-knowledge","summary":"History backfill: 42 commits, 10 releases, 2 integrations","tags":["v0.2.7","v0.2.6","v0.2.5","v0.2.4","v0.2.3"]}
+{"ts":"2026-04-26T16:30:47Z","type":"release","tool":"git","slug":"agent-knowledge","summary":"Release v0.2.8","tags":["v0.2.8"]}

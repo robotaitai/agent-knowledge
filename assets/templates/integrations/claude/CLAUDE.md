@@ -19,7 +19,6 @@ All knowledge lives in `./agent-knowledge/` (symlink to external vault).
 | `History/` | Yes (diary) | What happened over time |
 | `Evidence/` | No | Raw imports -- never promote to Memory |
 | `Outputs/` | No | Generated views -- never treat as truth |
-| `Sessions/` | No | Temporary state -- prune aggressively |
 
 ## After meaningful work
 

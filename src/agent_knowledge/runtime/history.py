@@ -7,7 +7,6 @@ becoming a second knowledge base.
     History/ = what happened over time (lightweight diary)
     Evidence/= imported/extracted material (non-canonical sources)
     Outputs/ = generated helper artifacts
-    Sessions/= temporary working state
 
 Structure created under the vault:
     History/
@@ -525,7 +524,7 @@ def run_backfill(
     - a backfill timeline note in History/timeline/
     - regenerates History/history.md
 
-    Never touches Memory/, Evidence/, Sessions/, or Outputs/ content.
+    Never touches Memory/, Evidence/, or Outputs/ content.
     Idempotent: safe to run repeatedly.
 
     Returns a summary dict.

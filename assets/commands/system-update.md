@@ -36,7 +36,6 @@ Do NOT use `/system-update` to:
 
 - `Memory/` — curated durable knowledge
 - `Evidence/` — imported or extracted material
-- `Sessions/` — temporary state
 - `Outputs/` — generated views (except STATUS.md version fields)
 - Any file not listed in the table above
 

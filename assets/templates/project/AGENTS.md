@@ -99,7 +99,6 @@ After onboarding is complete, during normal work:
 - `Memory/` -- Curated, durable project knowledge (source of truth)
 - `Evidence/` -- Imported/extracted material (not curated truth)
 - `Outputs/` -- Generated helper views (never canonical)
-- `Sessions/` -- Temporary session state (prune aggressively)
 - `STATUS.md` -- Onboarding and maintenance state
 - `.agent-project.yaml` -- Project configuration
 

@@ -51,5 +51,4 @@ Do NOT write to memory for:
 - `./agent-knowledge/Memory/` -- Canonical project knowledge (write here)
 - `./agent-knowledge/Evidence/` -- Non-canonical: imports, extracts
 - `./agent-knowledge/Outputs/` -- Generated views (never canonical)
-- `./agent-knowledge/Sessions/` -- Temporary working state
 - `./agent-knowledge/History/` -- Lightweight diary, events, releases

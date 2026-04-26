@@ -86,7 +86,6 @@ check_required_path "$MEMORY_ROOT" "Memory/MEMORY.md"
 check_required_dir "$DECISIONS_DIR" "Memory/decisions"
 check_required_dir "$EVIDENCE_RAW_DIR" "Evidence/raw"
 check_required_dir "$EVIDENCE_IMPORTS_DIR" "Evidence/imports"
-check_required_dir "$SESSIONS_DIR" "Sessions"
 check_required_dir "$OUTPUTS_DIR" "Outputs"
 
 if [ -f "$AGENT_PROJECT_FILE" ]; then
