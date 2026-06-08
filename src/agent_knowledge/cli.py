@@ -370,8 +370,16 @@ def doctor(project: str, dry_run: bool, json_mode: bool) -> None:
         check_stale_notes,
     )
     from agent_knowledge.runtime.history import history_exists
+    from agent_knowledge.runtime.health import check_install_health
 
     repo_root = Path(project).resolve()
+
+    # Install health check (legacy/shadowed package copies that block updates)
+    install_issues = check_install_health()
+    if install_issues and not json_mode:
+        for issue in install_issues:
+            click.secho(f"Warning: {issue}", fg="yellow", err=True)
+        click.echo("", err=True)
 
     # Framework version staleness check
     stale, prior, current = is_stale(repo_root)
@@ -1714,21 +1722,42 @@ def upgrade(yes: bool, check: bool) -> None:
 
     click.echo(f"New version available: {latest}", err=True)
 
+    # Warn about legacy installs that will block the upgrade from taking effect.
+    from agent_knowledge.runtime.health import find_legacy_installs, detect_install_method
+
+    legacy = find_legacy_installs()
+    if legacy:
+        method = detect_install_method()
+        click.secho(
+            "Legacy install(s) detected that can shadow this upgrade; remove them first:",
+            fg="yellow",
+            err=True,
+        )
+        for item in legacy:
+            if method == "pipx":
+                cmd = f"pipx uninstall {item['name']}"
+            elif method == "uv":
+                cmd = f"uv tool uninstall {item['name']}"
+            else:
+                cmd = f"{Path(sys.executable).name} -m pip uninstall -y {item['name']}"
+            click.secho(f"  {item['name']} {item['version']}  ->  {cmd}", fg="yellow", err=True)
+        click.echo("", err=True)
+
     if check:
         return
 
-    # Detect installer: pipx wraps the executable inside a venv it manages
-    exe = Path(sys.executable)
-    in_pipx = "pipx" in str(exe) or "pipx" in os.environ.get("PIPX_HOME", "")
-    if not in_pipx:
-        # Also check if the bedrock script lives in a pipx bin dir
-        import shutil
-        bedrock_exe = shutil.which("bedrock") or ""
-        in_pipx = "pipx" in bedrock_exe
+    # Detect installer. uv tool and pipx each wrap bedrock in their own venv;
+    # using the wrong upgrader silently no-ops or fails, so match the source.
+    import shutil
 
-    if in_pipx:
+    bedrock_exe = shutil.which("bedrock") or ""
+    haystack = f"{sys.executable} {bedrock_exe} {sys.prefix} {os.environ.get('PIPX_HOME', '')}".lower()
+    if "pipx" in haystack:
         upgrade_cmd = ["pipx", "upgrade", "project-bedrock"]
         installer = "pipx"
+    elif (os.sep + "uv" + os.sep) in haystack or "/uv/tools/" in haystack:
+        upgrade_cmd = ["uv", "tool", "upgrade", "project-bedrock"]
+        installer = "uv tool"
     else:
         upgrade_cmd = [sys.executable, "-m", "pip", "install", "--upgrade", "project-bedrock"]
         installer = "pip"
