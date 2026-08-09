@@ -34,6 +34,17 @@ Otherwise:
 - Update current priorities and open loops in `./bedrock/Work/`
 - Run `/memory-update`
 
+## How Memory is split
+
+Memory is organized per area, one doc per subsystem:
+
+- `Memory/<area>.md` -- everything durable about that area (navigation, perception, auth, billing, ...). If work touches an area with no doc yet, create it.
+- `Memory/decisions.md` -- dated rationale for choices, not the design itself
+- `Memory/PROJECT.md` -- cross-area overview only; it links to the area docs
+
+Name areas after the project's own functional layers, not its hardware or file
+layout, so cross-cutting subsystems get a home instead of being scattered.
+
 ## Periodic
 
 - Run `/system-update` every few sessions to refresh integration files

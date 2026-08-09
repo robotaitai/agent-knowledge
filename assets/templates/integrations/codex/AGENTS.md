@@ -57,9 +57,25 @@ Rules:
 
 After meaningful work:
 
-1. Update `./bedrock/Memory/` with stable project knowledge
+1. Update the affected `./bedrock/Memory/<area>.md` docs with stable project knowledge
 2. Update `./bedrock/Work/NOW.md` if priorities or next actions changed
 3. Update `./bedrock/Work/open-questions.md`, `./bedrock/Work/risks.md`, or `./bedrock/Work/backlog.md` if needed
 4. Run `bedrock sync --project .`
 
 Do not dump raw session notes into the cockpit.
+
+---
+
+## How Memory Is Split
+
+Memory is organized per area, one doc per subsystem:
+
+| File | Holds |
+|------|-------|
+| `Memory/<area>.md` | Everything durable about that area (navigation, perception, auth, billing, ...) |
+| `Memory/decisions.md` | Dated rationale for choices, not the design itself |
+| `Memory/PROJECT.md` | Cross-area overview only; links to the area docs |
+
+If work touches an area with no doc yet, create `Memory/<area>.md`. Name areas
+after the project's own functional layers, not its hardware or file layout, so
+cross-cutting subsystems get a home instead of being scattered.

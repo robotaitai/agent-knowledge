@@ -91,6 +91,68 @@ def _normalize_json(text: str) -> dict | None:
         return None
 
 
+# Commands bedrock generates into hook configs (agent-knowledge is the pre-rename
+# spelling). Anything else in those files was added by the project and must
+# survive a refresh.
+_BEDROCK_HOOK_MARKERS = tuple(
+    f"{cli} {sub}"
+    for cli in ("bedrock", "agent-knowledge")
+    for sub in ("sync", "update", "refresh-system")
+)
+
+
+def _is_bedrock_command(command: Any) -> bool:
+    return isinstance(command, str) and any(m in command for m in _BEDROCK_HOOK_MARKERS)
+
+
+def _merge_claude_hooks(template: dict, current: dict) -> dict:
+    """Replace bedrock-owned Claude hooks with the template's, keep everything else.
+
+    `.claude/settings.json` is shared with the project (permissions, env, and
+    hooks the project added itself), so a refresh may only rewrite the entries
+    bedrock generated.
+    """
+    merged = json.loads(json.dumps(current))
+    tmpl_hooks = template.get("hooks") or {}
+    curr_hooks = merged.get("hooks")
+    if not isinstance(curr_hooks, dict):
+        curr_hooks = {}
+
+    for event, tmpl_groups in tmpl_hooks.items():
+        kept: list[Any] = []
+        for group in curr_hooks.get(event, []) or []:
+            if not isinstance(group, dict):
+                kept.append(group)
+                continue
+            inner = [
+                h
+                for h in (group.get("hooks") or [])
+                if not (isinstance(h, dict) and _is_bedrock_command(h.get("command")))
+            ]
+            if inner:
+                kept.append({**group, "hooks": inner})
+        curr_hooks[event] = list(tmpl_groups) + kept
+
+    merged["hooks"] = curr_hooks
+    return merged
+
+
+def _merge_cursor_hooks(template: dict, current: dict) -> dict:
+    """Replace bedrock-owned Cursor hooks with the template's, keep everything else."""
+    merged = json.loads(json.dumps(current))
+    merged["version"] = template.get("version", merged.get("version"))
+    if template.get("description"):
+        merged["description"] = template["description"]
+
+    kept = [
+        h
+        for h in (merged.get("hooks") or [])
+        if not (isinstance(h, dict) and _is_bedrock_command(h.get("command")))
+    ]
+    merged["hooks"] = list(template.get("hooks") or []) + kept
+    return merged
+
+
 # --------------------------------------------------------------------------- #
 # Per-integration refreshers                                                   #
 # --------------------------------------------------------------------------- #
@@ -141,20 +203,17 @@ def _refresh_cursor_hooks(repo_root: Path, *, dry_run: bool) -> dict[str, Any]:
     if not target.is_file():
         return {"target": ".cursor/hooks.json", "action": "skip", "detail": "not installed; run: bedrock init"}
 
-    repo_abs = repo_root.resolve().as_posix()
-    template_content = template_path.read_text(encoding="utf-8").replace("<repo-path>", repo_abs)
-    current_content = target.read_text(encoding="utf-8", errors="replace")
-
-    tmpl_obj = _normalize_json(template_content)
-    curr_obj = _normalize_json(current_content)
+    tmpl_obj = _normalize_json(template_path.read_text(encoding="utf-8"))
+    curr_obj = _normalize_json(target.read_text(encoding="utf-8", errors="replace"))
 
     if tmpl_obj is None or curr_obj is None:
         return {"target": ".cursor/hooks.json", "action": "skip", "detail": "could not parse JSON"}
 
-    if tmpl_obj == curr_obj:
+    merged = _merge_cursor_hooks(tmpl_obj, curr_obj)
+    if merged == curr_obj:
         return {"target": ".cursor/hooks.json", "action": "up-to-date", "detail": "hooks match current template"}
 
-    action = _write(target, template_content, dry_run=dry_run)
+    action = _write(target, json.dumps(merged, indent=2) + "\n", dry_run=dry_run)
     return {"target": ".cursor/hooks.json", "action": action, "detail": "refreshed from bundled template"}
 
 
@@ -200,21 +259,18 @@ def _refresh_claude_settings(repo_root: Path, *, dry_run: bool) -> dict[str, Any
     if not target.is_file():
         return {"target": ".claude/settings.json", "action": "skip", "detail": "not installed; run: bedrock init"}
 
-    repo_abs = repo_root.resolve().as_posix()
-    template_content = template_path.read_text(encoding="utf-8").replace("<repo-path>", repo_abs)
-    current_content = target.read_text(encoding="utf-8", errors="replace")
-
-    tmpl_obj = _normalize_json(template_content)
-    curr_obj = _normalize_json(current_content)
+    tmpl_obj = _normalize_json(template_path.read_text(encoding="utf-8"))
+    curr_obj = _normalize_json(target.read_text(encoding="utf-8", errors="replace"))
 
     if tmpl_obj is None or curr_obj is None:
         return {"target": ".claude/settings.json", "action": "skip", "detail": "could not parse JSON"}
 
-    if tmpl_obj == curr_obj:
+    merged = _merge_claude_hooks(tmpl_obj, curr_obj)
+    if merged == curr_obj:
         return {"target": ".claude/settings.json", "action": "up-to-date", "detail": "settings match current template"}
 
-    action = _write(target, template_content, dry_run=dry_run)
-    return {"target": ".claude/settings.json", "action": action, "detail": "refreshed from bundled template"}
+    action = _write(target, json.dumps(merged, indent=2) + "\n", dry_run=dry_run)
+    return {"target": ".claude/settings.json", "action": action, "detail": "refreshed bedrock hooks, preserved project settings"}
 
 
 def _refresh_claude_md(repo_root: Path, *, dry_run: bool) -> dict[str, Any]:
@@ -381,8 +437,23 @@ def _refresh_status_md(vault_dir: Path, version: str, *, dry_run: bool) -> dict[
     return {"target": "STATUS.md", "action": action, "detail": detail}
 
 
+def _localize_real_path(text: str) -> tuple[str, bool]:
+    """Rewrite an absolute `real_path` to `./bedrock` for local vaults.
+
+    In `vault_mode: local` the vault is always `<repo>/bedrock`, so an absolute
+    path only records which machine generated the file and breaks every other
+    clone. The rest of the file is already relative.
+    """
+    if not re.search(r"^\s*vault_mode:\s*local\s*$", text, re.MULTILINE):
+        return text, False
+    m = re.search(r"^(\s*real_path:\s*)(\S+)\s*$", text, re.MULTILINE)
+    if not m or m.group(2).startswith((".", "$", "<")):
+        return text, False
+    return text[: m.start()] + f"{m.group(1)}./bedrock" + text[m.end():], True
+
+
 def _refresh_project_yaml(repo_root: Path, version: str, *, dry_run: bool) -> dict[str, Any]:
-    """Update framework_version in .agent-project.yaml."""
+    """Update framework_version and de-absolutize real_path in .agent-project.yaml."""
     target = repo_root / ".agent-project.yaml"
 
     if not target.is_file():
@@ -394,15 +465,21 @@ def _refresh_project_yaml(repo_root: Path, version: str, *, dry_run: bool) -> di
     if m:
         prior = m.group(1).strip().strip("\"'")
 
-    if prior == version:
+    updated, localized = _localize_real_path(current)
+
+    if prior == version and not localized:
         return {"target": ".agent-project.yaml", "action": "up-to-date", "detail": f"framework_version already {version}"}
 
-    updated = _yaml_set(current, "framework_version", version)
+    if prior != version:
+        updated = _yaml_set(updated, "framework_version", version)
+
     action = _write(target, updated, dry_run=dry_run)
-    detail = f"set framework_version: {version}"
-    if prior:
-        detail += f" (was: {prior})"
-    return {"target": ".agent-project.yaml", "action": action, "detail": detail}
+    details = []
+    if prior != version:
+        details.append(f"set framework_version: {version}" + (f" (was: {prior})" if prior else ""))
+    if localized:
+        details.append("real_path -> ./bedrock (portable across machines)")
+    return {"target": ".agent-project.yaml", "action": action, "detail": "; ".join(details)}
 
 
 # --------------------------------------------------------------------------- #

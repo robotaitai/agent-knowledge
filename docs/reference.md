@@ -11,12 +11,14 @@ Build a polished standalone site from your knowledge vault -- no Obsidian requir
 ```bash
 bedrock export-html       # generate
 bedrock view              # generate and open in browser
+bedrock view --serve      # generate and serve on http://127.0.0.1 (Ctrl-C to stop)
 ```
 
 The generated site includes an overview page, branch tree navigation, note detail
 view, evidence view, interactive graph view, and machine-readable `knowledge.json`
 and `graph.json`. It writes to `Views/site/` by default, with legacy
-`Outputs/site/` fallback for older projects. Opens via `file://` with no server needed.
+`Outputs/site/` fallback for older projects. Opens via `file://` with no server needed;
+use `--serve` (optionally with `--port`) when the browser restricts local files.
 
 Memory/ notes are always primary. Evidence and generated view items are clearly marked
 non-canonical.

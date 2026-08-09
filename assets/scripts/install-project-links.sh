@@ -14,7 +14,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 AGENTS_RULES_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 PROJECT_TEMPLATE_DIR="$AGENTS_RULES_DIR/templates/project"
-HOOK_TEMPLATE="$AGENTS_RULES_DIR/templates/hooks/hooks.json.template"
+# Same template refresh-system installs, so init and refresh never disagree.
+HOOK_TEMPLATE="$AGENTS_RULES_DIR/templates/integrations/cursor/hooks.json"
 
 # shellcheck source=/dev/null
 . "$SCRIPT_DIR/lib/knowledge-common.sh"
@@ -201,7 +202,13 @@ else
 fi
 
 VAULT_MODE_VALUE="external"
-[ "$LOCAL_MODE" -eq 1 ] && VAULT_MODE_VALUE="local"
+REAL_PATH_VALUE="$KNOWLEDGE_REAL_DIR"
+if [ "$LOCAL_MODE" -eq 1 ]; then
+    VAULT_MODE_VALUE="local"
+    # Local vaults always live at <repo>/bedrock. Record it relatively so the
+    # tracked file stays valid on every machine that clones the repo.
+    REAL_PATH_VALUE="./bedrock"
+fi
 
 if [ ! -f "$AGENT_PROJECT_FILE" ] || [ "$FORCE" -eq 1 ]; then
     kc_replace_in_template \
@@ -210,7 +217,7 @@ if [ ! -f "$AGENT_PROJECT_FILE" ] || [ "$FORCE" -eq 1 ]; then
         ".agent-project.yaml" \
         "<project-name>" "$PROJECT_NAME" \
         "<project-slug>" "$PROJECT_SLUG" \
-        "<absolute-path-to-dedicated-knowledge-folder>" "$KNOWLEDGE_REAL_DIR" \
+        "<absolute-path-to-dedicated-knowledge-folder>" "$REAL_PATH_VALUE" \
         "<vault-mode>" "$VAULT_MODE_VALUE"
     case "$KC_LAST_ACTION" in
         created|updated|would-create|would-update)
@@ -257,11 +264,9 @@ fi
 if [ "$INSTALL_HOOKS" -eq 1 ]; then
     kc_ensure_dir "$CURSOR_DIR" ".cursor/"
     if [ ! -f "$CURSOR_HOOKS_FILE" ] || [ "$FORCE" -eq 1 ]; then
-        kc_replace_in_template \
-            "$HOOK_TEMPLATE" \
-            "$CURSOR_HOOKS_FILE" \
-            ".cursor/hooks.json" \
-            "<repo-path>" "$TARGET_PROJECT"
+        # Hook commands use --project . -- they run with the repo root as cwd,
+        # so no machine-specific path is baked into the tracked config.
+        kc_copy_file "$HOOK_TEMPLATE" "$CURSOR_HOOKS_FILE" ".cursor/hooks.json"
         case "$KC_LAST_ACTION" in
             created|updated|would-create|would-update)
                 CHANGES+=(".cursor/hooks.json")

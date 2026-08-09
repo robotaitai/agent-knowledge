@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bedrock sync --project <repo-path> && bedrock refresh-system --project <repo-path>"
+            "command": "bedrock sync --project . && bedrock refresh-system --project ."
           }
         ]
       }
@@ -17,7 +17,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bedrock sync --project <repo-path>"
+            "command": "bedrock sync --project ."
           }
         ]
       }
@@ -28,7 +28,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bedrock sync --project <repo-path>"
+            "command": "bedrock sync --project ."
           }
         ]
       }

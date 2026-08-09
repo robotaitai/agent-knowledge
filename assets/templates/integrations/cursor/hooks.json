@@ -5,22 +5,22 @@
     {
       "name": "project-knowledge-sync",
       "event": "post-write",
-      "command": "bedrock update --summary-file <repo-path>/.cursor/knowledge-sync.last.json --project <repo-path>"
+      "command": "bedrock update --summary-file ./.cursor/knowledge-sync.last.json --project ."
     },
     {
       "name": "project-knowledge-session-start",
       "event": "session-start",
-      "command": "bedrock sync --project <repo-path> && bedrock refresh-system --project <repo-path>"
+      "command": "bedrock sync --project . && bedrock refresh-system --project ."
     },
     {
       "name": "project-knowledge-stop",
       "event": "stop",
-      "command": "bedrock sync --project <repo-path>"
+      "command": "bedrock sync --project ."
     },
     {
       "name": "project-knowledge-pre-compact",
       "event": "preCompact",
-      "command": "bedrock sync --project <repo-path>"
+      "command": "bedrock sync --project ."
     }
   ]
 }

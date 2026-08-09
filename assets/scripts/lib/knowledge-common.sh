@@ -768,7 +768,13 @@ kc_status_load() {
     STATUS_PROJECT="$PROJECT_NAME"
     STATUS_PROFILE="$PROJECT_PROFILE"
     STATUS_ONTOLOGY_MODEL="2"
-    STATUS_REAL_PATH="$KNOWLEDGE_REAL_DIR"
+    # Local vaults always live at <repo>/bedrock -- record it relatively so the
+    # tracked STATUS.md stays valid on every machine that clones the repo.
+    if [ "${VAULT_MODE:-external}" = "local" ]; then
+        STATUS_REAL_PATH="./bedrock"
+    else
+        STATUS_REAL_PATH="$KNOWLEDGE_REAL_DIR"
+    fi
     STATUS_POINTER_PATH="$POINTER_DISPLAY"
     STATUS_LAST_BOOTSTRAP=""
     STATUS_LAST_IMPORT=""
@@ -790,6 +796,13 @@ kc_status_load() {
     STATUS_PROFILE="$(kc_yaml_leaf_value "$STATUS_FILE" "profile_hint" || kc_yaml_leaf_value "$STATUS_FILE" "profile" || printf '%s' "$STATUS_PROFILE")"
     STATUS_ONTOLOGY_MODEL="$(kc_yaml_leaf_value "$STATUS_FILE" "ontology_model" || printf '2')"
     STATUS_REAL_PATH="$(kc_yaml_leaf_value "$STATUS_FILE" "real_knowledge_path" || printf '%s' "$STATUS_REAL_PATH")"
+    # Heal absolute paths written by an older version or another machine.
+    if [ "${VAULT_MODE:-external}" = "local" ]; then
+        case "$STATUS_REAL_PATH" in
+            .*) ;;
+            *) STATUS_REAL_PATH="./bedrock" ;;
+        esac
+    fi
     STATUS_POINTER_PATH="$(kc_yaml_leaf_value "$STATUS_FILE" "local_pointer_path" || printf '%s' "$STATUS_POINTER_PATH")"
     STATUS_ONBOARDING="$(kc_yaml_leaf_value "$STATUS_FILE" "onboarding" || printf 'pending')"
     STATUS_LAST_BOOTSTRAP="$(kc_yaml_leaf_value "$STATUS_FILE" "last_bootstrap" || true)"

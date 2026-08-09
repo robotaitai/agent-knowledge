@@ -724,11 +724,15 @@ def export_html(
 @main.command()
 @click.option("--project", default=".", type=click.Path(exists=True), help="Project repo root.")
 @click.option("--output-dir", default=None, type=click.Path(), help="Override output directory for the site.")
-def view(project: str, output_dir: str | None) -> None:
+@click.option("--serve", is_flag=True, help="Serve the site over a local HTTP server instead of file:// (blocks until Ctrl-C).")
+@click.option("--port", default=0, type=int, help="Port for --serve (default: any free port).")
+def view(project: str, output_dir: str | None, serve: bool, port: int) -> None:
     """Build the knowledge site and open it in the browser.
 
     Equivalent to export-html --open. No Obsidian required.
     The site is generated into Views/site/ by default and opened via file://.
+    Use --serve when the browser restricts local files (strict CSP, sandboxed
+    profiles); it serves the same directory over http://127.0.0.1 instead.
     """
     from agent_knowledge.runtime.site import generate_site
 
@@ -740,7 +744,37 @@ def view(project: str, output_dir: str | None) -> None:
     out_dir = Path(output_dir).resolve() if output_dir else None
     result = generate_site(vault, out_dir)
     click.echo(f"{result['action']}: {result['site_dir']}", err=True)
+
+    if serve:
+        _serve_site(Path(result["site_dir"]), Path(result["index_html"]), port)
+        return
+
     _open_in_browser(Path(result["index_html"]))
+
+
+def _serve_site(site_dir: Path, index_html: Path, port: int) -> None:
+    """Serve a generated site over a local HTTP server until interrupted."""
+    import functools
+    import webbrowser
+    from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+
+    handler = functools.partial(SimpleHTTPRequestHandler, directory=str(site_dir))
+    try:
+        httpd = ThreadingHTTPServer(("127.0.0.1", port), handler)
+    except OSError as exc:
+        click.echo(f"Could not start local server on port {port}: {exc}", err=True)
+        sys.exit(1)
+
+    rel = index_html.relative_to(site_dir).as_posix() if index_html.is_relative_to(site_dir) else "index.html"
+    url = f"http://127.0.0.1:{httpd.server_address[1]}/{rel}"
+    click.echo(f"serving: {url}  (Ctrl-C to stop)", err=True)
+    webbrowser.open(url)
+    try:
+        httpd.serve_forever()
+    except KeyboardInterrupt:
+        click.echo("", err=True)
+    finally:
+        httpd.server_close()
 
 
 # -- clean-import ---------------------------------------------------------- #
@@ -1212,10 +1246,11 @@ def migrate_to_local(project: str, knowledge_home: str | None, dry_run: bool) ->
                 text = text.replace(
                     "pointer_path:", "vault_mode: local\n  pointer_path:", 1
                 )
-            # Update real_path to in-repo path
+            # Update real_path to the in-repo vault, recorded relatively so the
+            # tracked file stays valid on every machine that clones the repo.
             text = _re.sub(
                 r"real_path:\s*\S+",
-                f"real_path: {pointer}",
+                "real_path: ./bedrock",
                 text,
             )
             project_yaml.write_text(text, encoding="utf-8")

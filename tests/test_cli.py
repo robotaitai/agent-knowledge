@@ -464,6 +464,50 @@ def test_search_prefers_memory(tmp_path: Path):
 # -- viewer / export-html tests -------------------------------------------- #
 
 
+def test_view_serve_serves_site_over_http(tmp_path: Path):
+    """view --serve must serve index.html and its data files over 127.0.0.1."""
+    import os
+    import socket
+    import time
+    import urllib.error
+    import urllib.request
+
+    repo = _init_repo(tmp_path, "view-serve")
+    kh = tmp_path / "kh"
+    _run("init", "--repo", str(repo), "--knowledge-home", str(kh))
+    _run("sync", "--project", str(repo))
+
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        port = s.getsockname()[1]
+
+    env = {**os.environ, "BROWSER": "echo"}  # keep the test from opening a real browser
+    proc = subprocess.Popen(
+        [*BIN, "view", "--project", str(repo), "--serve", "--port", str(port)],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        env=env,
+    )
+    try:
+        codes = {}
+        deadline = time.time() + 30
+        while time.time() < deadline:
+            try:
+                for name in ("index.html", "data/knowledge.json"):
+                    with urllib.request.urlopen(f"http://127.0.0.1:{port}/{name}", timeout=2) as resp:
+                        codes[name] = resp.status
+                break
+            except (urllib.error.URLError, OSError):
+                assert proc.poll() is None, f"server exited: {proc.communicate()[1]}"
+                time.sleep(0.5)
+        assert codes.get("index.html") == 200, "index.html must be served over HTTP"
+        assert codes.get("data/knowledge.json") == 200, "site data must be served over HTTP"
+    finally:
+        proc.terminate()
+        proc.wait(timeout=10)
+
+
 def test_export_html_creates_site(tmp_path: Path):
     """export-html must create Views/site/index.html and data/knowledge.json."""
     repo = _init_repo(tmp_path, "html-test")
@@ -1705,9 +1749,9 @@ def test_claude_settings_hooks_reference_installed_cli(tmp_path: Path):
     assert "bash " not in content
 
 
-def test_claude_settings_hooks_contain_repo_path(tmp_path: Path):
-    """Hook commands must include the --project <repo-path> for the specific repo."""
-    repo = _init_repo(tmp_path, "claude-repo-path")
+def test_claude_settings_hooks_use_relative_project(tmp_path: Path):
+    """Hook commands must target --project . so the tracked config stays portable."""
+    repo = _init_repo(tmp_path, "claude repo path")  # space: must not need quoting
     kh = tmp_path / "kh"
     _run("init", "--repo", str(repo), "--knowledge-home", str(kh))
 
@@ -1717,7 +1761,73 @@ def test_claude_settings_hooks_contain_repo_path(tmp_path: Path):
         for entry in hook_list:
             for hook in entry.get("hooks", []):
                 cmd = hook.get("command", "")
-                assert repo_abs in cmd, f"Hook for {event} must contain repo path"
+                assert "--project ." in cmd, f"Hook for {event} must use --project ."
+                assert repo_abs not in cmd, f"Hook for {event} must not hardcode the repo path"
+
+
+def test_cursor_hooks_use_relative_project(tmp_path: Path):
+    """Cursor hook commands must be free of machine-specific absolute paths."""
+    repo = _init_repo(tmp_path, "cursor repo path")  # space: must not need quoting
+    kh = tmp_path / "kh"
+    _run("init", "--repo", str(repo), "--knowledge-home", str(kh))
+
+    data = json.loads((repo / ".cursor" / "hooks.json").read_text())
+    repo_abs = str(repo.resolve())
+    for hook in data["hooks"]:
+        cmd = hook["command"]
+        assert "--project ." in cmd, f"{hook['name']} must use --project ."
+        assert repo_abs not in cmd, f"{hook['name']} must not hardcode the repo path"
+
+
+def test_refresh_system_preserves_foreign_claude_hooks(tmp_path: Path):
+    """refresh-system must refresh bedrock hooks without dropping project-added ones."""
+    repo = _init_repo(tmp_path, "claude-foreign-hooks")
+    kh = tmp_path / "kh"
+    _run("init", "--repo", str(repo), "--knowledge-home", str(kh))
+
+    settings = repo / ".claude" / "settings.json"
+    data = json.loads(settings.read_text())
+    # A hook the project added itself, plus a stale bedrock hook with an absolute path.
+    data["hooks"]["SessionStart"].append(
+        {"matcher": "", "hooks": [{"type": "command", "command": "bd prime"}]}
+    )
+    data["hooks"]["Stop"] = [
+        {"matcher": "", "hooks": [{"type": "command", "command": f"bedrock sync --project {repo}"}]}
+    ]
+    data["permissions"] = {"allow": ["Bash(ls:*)"]}
+    settings.write_text(json.dumps(data, indent=2))
+
+    r = _run("refresh-system", "--project", str(repo))
+    assert r.returncode == 0, f"refresh-system failed: {r.stderr}"
+
+    after = json.loads(settings.read_text())
+    commands = [
+        h.get("command", "")
+        for groups in after["hooks"].values()
+        for g in groups
+        for h in g.get("hooks", [])
+    ]
+    assert "bd prime" in commands, "project-added hook must survive refresh-system"
+    assert str(repo) not in " ".join(commands), "stale absolute path must be replaced"
+    assert after.get("permissions") == {"allow": ["Bash(ls:*)"]}, "non-hook settings must survive"
+
+
+def test_refresh_system_localizes_real_path(tmp_path: Path):
+    """refresh-system must rewrite an absolute real_path to ./bedrock for local vaults."""
+    repo = _init_repo(tmp_path, "local-real-path")
+    kh = tmp_path / "kh"
+    _run("init", "--repo", str(repo), "--knowledge-home", str(kh))
+
+    project_yaml = repo / ".agent-project.yaml"
+    text = project_yaml.read_text()
+    assert "vault_mode: local" in text
+    project_yaml.write_text(
+        re.sub(r"real_path:\s*\S+", f"real_path: {tmp_path / 'other-machine' / 'bedrock'}", text)
+    )
+
+    r = _run("refresh-system", "--project", str(repo))
+    assert r.returncode == 0, f"refresh-system failed: {r.stderr}"
+    assert "real_path: ./bedrock" in project_yaml.read_text()
 
 
 def test_init_installs_claude_commands(tmp_path: Path):
