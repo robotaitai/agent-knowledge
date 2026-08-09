@@ -1,21 +1,43 @@
 ---
-description: bedrock -- project memory contract, always active
+description: bedrock -- project cockpit contract, always active
 alwaysApply: true
 ---
 
-This project uses **bedrock** for persistent memory.
-All knowledge lives in `./bedrock/`.
+This project uses **bedrock** as a small project cockpit.
+All project context lives in `./bedrock/`.
+
+## Project cockpit
+
+- `Memory/` = what the project knows
+- `Work/` = what matters now
+- `Views/` = generated human inspection views
+
+Legacy folders such as `History/`, `Evidence/`, `Outputs/`, or `Sessions/`
+may still exist for compatibility. They are not the main user-facing model.
 
 ## On session start
 
 1. Read `./bedrock/STATUS.md`
-2. If `onboarding: pending`, read `AGENTS.md` and follow the First-Time Onboarding instructions
-3. If `onboarding: complete`, read `./bedrock/Memory/MEMORY.md` for project context
+2. If `onboarding: pending`, read `AGENTS.md` and follow First-Time Onboarding
+3. If `onboarding: complete`, read `./bedrock/Memory/PROJECT.md`
+4. Read `./bedrock/Work/NOW.md`
+5. Load only the relevant Memory branches for the task
 
 ## After meaningful work
 
-- Run `/memory-update` — sync, update branches, log any decisions, summarize what changed
+- Run `/memory-update` to update the project cockpit
+
+## How Memory is split
+
+Memory is organized per area, one doc per subsystem:
+
+- `Memory/<area>.md` = everything durable about that area (navigation, perception, auth, billing, ...). If work touches an area with no doc yet, create it.
+- `Memory/decisions.md` = dated rationale for choices, not the design itself
+- `Memory/PROJECT.md` = cross-area overview only; it links to the area docs
+
+Name areas after the project's own functional layers, not its hardware or file
+layout, so cross-cutting subsystems get a home instead of being scattered.
 
 ## When the context window is getting long
 
-- Run `/compact-context` — saves memory, then resets the context window
+- Run `/compact-context` to save the project cockpit and reset context

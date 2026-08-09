@@ -2,13 +2,13 @@
   "hooks": {
     "PreCompact": [
       {
+        "matcher": "",
         "hooks": [
           {
-            "command": "bedrock sync --project /Users/taio/code/agent-knowledge",
-            "type": "command"
+            "type": "command",
+            "command": "bedrock sync --project ."
           }
-        ],
-        "matcher": ""
+        ]
       },
       {
         "hooks": [
@@ -22,13 +22,13 @@
     ],
     "SessionStart": [
       {
+        "matcher": "",
         "hooks": [
           {
-            "command": "bedrock sync --project /Users/taio/code/agent-knowledge \u0026\u0026 bedrock refresh-system --project /Users/taio/code/agent-knowledge",
-            "type": "command"
+            "type": "command",
+            "command": "bedrock sync --project . && bedrock refresh-system --project ."
           }
-        ],
-        "matcher": ""
+        ]
       },
       {
         "hooks": [
@@ -42,13 +42,13 @@
     ],
     "Stop": [
       {
+        "matcher": "",
         "hooks": [
           {
-            "command": "bedrock sync --project /Users/taio/code/agent-knowledge",
-            "type": "command"
+            "type": "command",
+            "command": "bedrock sync --project ."
           }
-        ],
-        "matcher": ""
+        ]
       }
     ]
   }

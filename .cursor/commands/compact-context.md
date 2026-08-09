@@ -1,16 +1,9 @@
-Save project memory and reset the context window.
+Save the project cockpit and reset the context window.
 
 Steps:
-
 1. Run in terminal: `bedrock sync --project .`
-
-2. Review this session's work and identify what stable project knowledge changed.
-   For each changed area, update the relevant `./bedrock/Memory/<branch>.md`:
-   - Edit the Current State section with confirmed facts
-   - Add a dated entry to Recent Changes: `YYYY-MM-DD -- what changed`
-
-3. If branch summaries changed, update `./bedrock/Memory/MEMORY.md`.
-
-4. Summarize in one sentence what was saved and what was skipped.
-
-5. Start a new chat to continue working with a clean context window.
+2. Update stable project knowledge in `./bedrock/Memory/`
+3. Update `./bedrock/Work/NOW.md` if priorities or next actions changed
+4. Update `./bedrock/Work/open-questions.md`, `./bedrock/Work/risks.md`, or `./bedrock/Work/backlog.md` if needed
+5. Summarize in one sentence what was saved and what was skipped
+6. Start a new chat to continue with a clean context window
