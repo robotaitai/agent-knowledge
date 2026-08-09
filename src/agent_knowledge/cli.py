@@ -11,17 +11,14 @@ import click
 
 from agent_knowledge import __version__
 from agent_knowledge.runtime.paths import get_assets_dir
-from agent_knowledge.runtime.shell import run_bash_script, run_python_script
+from agent_knowledge.runtime.shell import open_in_browser, run_bash_script, run_python_script
 
 
-def _open_in_browser(path: Path) -> None:
-    """Open a local file in the system browser, reliably across platforms."""
-    if sys.platform == "darwin":
-        subprocess.run(["open", str(path)], check=False)
-    elif sys.platform.startswith("linux"):
-        subprocess.run(["xdg-open", str(path)], check=False)
-    else:
-        os.startfile(str(path))  # Windows
+def _open_in_browser(target: Path | str) -> None:
+    """Open a local file or URL in the system browser, or print it if there is none."""
+    target = target.as_uri() if isinstance(target, Path) else target
+    if not open_in_browser(target):
+        click.echo(f"no display detected; open it yourself: {target}", err=True)
 
 
 def _add_common_flags(
@@ -48,34 +45,12 @@ def main() -> None:
 
 # -- helpers --------------------------------------------------------------- #
 
-_LOCAL_GITIGNORE_BLOCK = """\
-# bedrock: noisy auto-generated content excluded from git
-# Curated knowledge (Memory/, Work/, History/, Evidence/imports/) IS tracked.
-bedrock/Evidence/raw/
-bedrock/Views/site/
-bedrock/Views/graph/*.json
-bedrock/Views/graph/*.md
-bedrock/Views/graph/*.canvas
-bedrock/Outputs/absorb-manifest.md
-bedrock/.obsidian/workspace
-bedrock/.obsidian/workspace.json
-bedrock/.obsidian/workspaces.json
-"""
-
-_LOCAL_GITIGNORE_SENTINEL = "bedrock/Evidence/raw/"
-
-
 def _patch_gitignore_for_local_knowledge(repo_path: Path, json_mode: bool) -> None:
     """Append local-mode knowledge gitignore patterns if not already present."""
-    gitignore = repo_path / ".gitignore"
-    if gitignore.exists():
-        content = gitignore.read_text(encoding="utf-8")
-        if _LOCAL_GITIGNORE_SENTINEL in content:
-            return  # already patched
-        gitignore.write_text(content.rstrip("\n") + "\n\n" + _LOCAL_GITIGNORE_BLOCK, encoding="utf-8")
-    else:
-        gitignore.write_text(_LOCAL_GITIGNORE_BLOCK, encoding="utf-8")
-    if not json_mode:
+    from agent_knowledge.runtime.gitignore import ensure_patterns
+
+    added = ensure_patterns(repo_path)
+    if added and not json_mode:
         click.echo("  .gitignore: added local knowledge patterns", err=True)
 
 
@@ -222,9 +197,7 @@ def _maybe_star() -> None:
             default=True,
             err=True,
         ):
-            import webbrowser
-
-            webbrowser.open(_REPO_URL)
+            _open_in_browser(_REPO_URL)
     except (EOFError, KeyboardInterrupt):
         click.echo("", err=True)
     _STAR_MARKER.touch()
@@ -725,14 +698,17 @@ def export_html(
 @click.option("--project", default=".", type=click.Path(exists=True), help="Project repo root.")
 @click.option("--output-dir", default=None, type=click.Path(), help="Override output directory for the site.")
 @click.option("--serve", is_flag=True, help="Serve the site over a local HTTP server instead of file:// (blocks until Ctrl-C).")
-@click.option("--port", default=0, type=int, help="Port for --serve (default: any free port).")
-def view(project: str, output_dir: str | None, serve: bool, port: int) -> None:
+@click.option("--port", default=0, type=click.IntRange(0, 65535), help="Port for --serve (default: any free port).")
+@click.option("--no-open", "no_open", is_flag=True, help="Generate the site and print its path without opening a browser.")
+def view(project: str, output_dir: str | None, serve: bool, port: int, no_open: bool) -> None:
     """Build the knowledge site and open it in the browser.
 
     Equivalent to export-html --open. No Obsidian required.
     The site is generated into Views/site/ by default and opened via file://.
     Use --serve when the browser restricts local files (strict CSP, sandboxed
-    profiles); it serves the same directory over http://127.0.0.1 instead.
+    profiles) or when working over SSH, where the port can be forwarded.
+    On a headless box or an SSH session the browser is skipped and the path is
+    printed instead; --no-open forces that everywhere.
     """
     from agent_knowledge.runtime.site import generate_site
 
@@ -746,16 +722,19 @@ def view(project: str, output_dir: str | None, serve: bool, port: int) -> None:
     click.echo(f"{result['action']}: {result['site_dir']}", err=True)
 
     if serve:
-        _serve_site(Path(result["site_dir"]), Path(result["index_html"]), port)
+        _serve_site(Path(result["site_dir"]), Path(result["index_html"]), port, no_open=no_open)
+        return
+
+    if no_open:
+        click.echo(Path(result["index_html"]).as_uri(), err=True)
         return
 
     _open_in_browser(Path(result["index_html"]))
 
 
-def _serve_site(site_dir: Path, index_html: Path, port: int) -> None:
+def _serve_site(site_dir: Path, index_html: Path, port: int, *, no_open: bool = False) -> None:
     """Serve a generated site over a local HTTP server until interrupted."""
     import functools
-    import webbrowser
     from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 
     handler = functools.partial(SimpleHTTPRequestHandler, directory=str(site_dir))
@@ -765,10 +744,14 @@ def _serve_site(site_dir: Path, index_html: Path, port: int) -> None:
         click.echo(f"Could not start local server on port {port}: {exc}", err=True)
         sys.exit(1)
 
-    rel = index_html.relative_to(site_dir).as_posix() if index_html.is_relative_to(site_dir) else "index.html"
+    try:
+        rel = index_html.relative_to(site_dir).as_posix()
+    except ValueError:
+        rel = "index.html"
     url = f"http://127.0.0.1:{httpd.server_address[1]}/{rel}"
     click.echo(f"serving: {url}  (Ctrl-C to stop)", err=True)
-    webbrowser.open(url)
+    if not no_open:
+        open_in_browser(url)
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:

@@ -91,18 +91,30 @@ def _normalize_json(text: str) -> dict | None:
         return None
 
 
-# Commands bedrock generates into hook configs (agent-knowledge is the pre-rename
-# spelling). Anything else in those files was added by the project and must
-# survive a refresh.
-_BEDROCK_HOOK_MARKERS = tuple(
-    f"{cli} {sub}"
-    for cli in ("bedrock", "agent-knowledge")
-    for sub in ("sync", "update", "refresh-system")
+# Hook commands bedrock has ever generated, current and historical
+# (agent-knowledge is the pre-rename spelling). A command must match one of
+# these *in full* to be replaced: anything a project extended -- for example
+# "bedrock sync --project . && npm run notify" -- is its own config and must
+# survive a refresh. The argument pattern stops at a shell operator so a chained
+# command cannot be swallowed, but allows spaces and quotes inside one argument.
+_CLI = r"(?:bedrock|agent-knowledge)"
+_ARG = r"""(?:"[^"]*"|'[^']*'|[^&|;<>]+?)"""
+_GENERATED_HOOK_COMMANDS = tuple(
+    re.compile(pattern)
+    for pattern in (
+        rf"{_CLI} sync --project {_ARG}",
+        rf"{_CLI} sync --project {_ARG} && {_CLI} refresh-system --project {_ARG}",
+        rf"{_CLI} update --summary-file {_ARG} --project {_ARG}",
+        rf"{_CLI} update --project {_ARG}",
+    )
 )
 
 
 def _is_bedrock_command(command: Any) -> bool:
-    return isinstance(command, str) and any(m in command for m in _BEDROCK_HOOK_MARKERS)
+    if not isinstance(command, str):
+        return False
+    stripped = command.strip()
+    return any(p.fullmatch(stripped) for p in _GENERATED_HOOK_COMMANDS)
 
 
 def _merge_claude_hooks(template: dict, current: dict) -> dict:
@@ -140,7 +152,8 @@ def _merge_claude_hooks(template: dict, current: dict) -> dict:
 def _merge_cursor_hooks(template: dict, current: dict) -> dict:
     """Replace bedrock-owned Cursor hooks with the template's, keep everything else."""
     merged = json.loads(json.dumps(current))
-    merged["version"] = template.get("version", merged.get("version"))
+    if template.get("version") is not None:
+        merged["version"] = template["version"]
     if template.get("description"):
         merged["description"] = template["description"]
 
@@ -444,12 +457,17 @@ def _localize_real_path(text: str) -> tuple[str, bool]:
     path only records which machine generated the file and breaks every other
     clone. The rest of the file is already relative.
     """
-    if not re.search(r"^\s*vault_mode:\s*local\s*$", text, re.MULTILINE):
+    if not re.search(r"""^\s*vault_mode:\s*["']?local["']?\s*$""", text, re.MULTILINE):
         return text, False
-    m = re.search(r"^(\s*real_path:\s*)(\S+)\s*$", text, re.MULTILINE)
-    if not m or m.group(2).startswith((".", "$", "<")):
+    # Match the whole line, not a \S+ token: the paths this exists to fix are
+    # exactly the ones that may contain spaces or quotes.
+    m = re.search(r"^(\s*real_path:)[ \t]*(.*)$", text, re.MULTILINE)
+    if not m:
         return text, False
-    return text[: m.start()] + f"{m.group(1)}./bedrock" + text[m.end():], True
+    value = m.group(2).strip().strip("\"'")
+    if not value or value.startswith((".", "$", "<")):
+        return text, False
+    return text[: m.start()] + f"{m.group(1)} ./bedrock" + text[m.end():], True
 
 
 def _refresh_project_yaml(repo_root: Path, version: str, *, dry_run: bool) -> dict[str, Any]:
@@ -480,6 +498,25 @@ def _refresh_project_yaml(repo_root: Path, version: str, *, dry_run: bool) -> di
     if localized:
         details.append("real_path -> ./bedrock (portable across machines)")
     return {"target": ".agent-project.yaml", "action": action, "detail": "; ".join(details)}
+
+
+def _refresh_gitignore(repo_root: Path, *, dry_run: bool) -> dict[str, Any]:
+    """Add bedrock-owned .gitignore patterns the project is missing.
+
+    `connect` wrote the patterns known at the time. refresh-system runs every
+    session, so it is where an existing checkout picks up patterns added since.
+    """
+    from agent_knowledge.runtime.gitignore import ensure_patterns
+
+    if not (repo_root / ".gitignore").is_file():
+        return {"target": ".gitignore", "action": "skip", "detail": "no .gitignore in this repo"}
+
+    missing = ensure_patterns(repo_root, dry_run=dry_run)
+    if not missing:
+        return {"target": ".gitignore", "action": "up-to-date", "detail": "all bedrock patterns present"}
+
+    action = "dry-run" if dry_run else "updated"
+    return {"target": ".gitignore", "action": action, "detail": f"added {', '.join(missing)}"}
 
 
 # --------------------------------------------------------------------------- #
@@ -808,6 +845,9 @@ def run_refresh(
     # .agent-project.yaml — version field
     r = _refresh_project_yaml(repo_root, version, dry_run=dry_run)
     changes.append(r)
+
+    # .gitignore — pick up per-machine patterns an older connect never wrote
+    changes.append(_refresh_gitignore(repo_root, dry_run=dry_run))
 
     # Regenerate the HTML site if one already exists (picks up new templates/styles)
     site_html = vault_dir / "Views" / "site" / "index.html"

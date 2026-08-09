@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 import sys
@@ -65,3 +66,39 @@ def run_python_script(name: str, args: list[str]) -> int:
     script = get_script(name)
     result = subprocess.run([sys.executable, str(script)] + args)
     return result.returncode
+
+
+def has_display() -> bool:
+    """Whether a GUI browser can plausibly be opened here.
+
+    A headless box or an SSH session has no browser to open; treating that as a
+    normal environment (print the path instead) beats letting the launcher fail
+    after the shell prompt has already returned.
+    """
+    if os.environ.get("SSH_CONNECTION") or os.environ.get("SSH_TTY"):
+        return False
+    if sys.platform == "darwin" or sys.platform == "win32":
+        return True
+    return bool(os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
+
+
+def open_in_browser(target: str) -> bool:
+    """Open a file path or URL in the system browser.
+
+    Returns False when there is no display, so the caller can print the target
+    instead. The launcher's own stderr is discarded: it arrives after the shell
+    prompt has returned and would otherwise scribble over the next prompt.
+    """
+    if not has_display():
+        return False
+
+    try:
+        if sys.platform == "darwin":
+            subprocess.run(["open", target], check=False, stderr=subprocess.DEVNULL)
+        elif sys.platform == "win32":
+            os.startfile(target)  # noqa: S606 -- Windows' own shell-open verb
+        else:
+            subprocess.run(["xdg-open", target], check=False, stderr=subprocess.DEVNULL)
+    except OSError:
+        return False
+    return True

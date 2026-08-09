@@ -1761,7 +1761,9 @@ def test_claude_settings_hooks_use_relative_project(tmp_path: Path):
         for entry in hook_list:
             for hook in entry.get("hooks", []):
                 cmd = hook.get("command", "")
-                assert "--project ." in cmd, f"Hook for {event} must use --project ."
+                # $CLAUDE_PROJECT_DIR keeps the hook correct when the session
+                # starts in a subdirectory; "." is the portable fallback.
+                assert '--project "${CLAUDE_PROJECT_DIR:-.}"' in cmd, f"Hook for {event} must target the project dir"
                 assert repo_abs not in cmd, f"Hook for {event} must not hardcode the repo path"
 
 
@@ -1828,6 +1830,232 @@ def test_refresh_system_localizes_real_path(tmp_path: Path):
     r = _run("refresh-system", "--project", str(repo))
     assert r.returncode == 0, f"refresh-system failed: {r.stderr}"
     assert "real_path: ./bedrock" in project_yaml.read_text()
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "/home/other/code/proj/bedrock",
+        "/Users/dor thalamus/Documents/New project/bedrock",  # the #9 path shape
+        '"/home/other/code/proj/bedrock"',
+    ],
+)
+def test_localize_real_path_handles_every_absolute_shape(value: str):
+    """Absolute real_path values must localize regardless of spaces or quoting."""
+    from agent_knowledge.runtime.refresh import _localize_real_path
+
+    text = f"knowledge:\n  vault_mode: local\n  real_path: {value}\n  ignore_file: ./x\n"
+    updated, localized = _localize_real_path(text)
+    assert localized, f"{value!r} must be recognized as absolute"
+    assert "real_path: ./bedrock" in updated
+    assert "ignore_file: ./x" in updated
+
+
+def test_localize_real_path_leaves_external_vaults_alone():
+    """External vaults legitimately point outside the repo and must not be rewritten."""
+    from agent_knowledge.runtime.refresh import _localize_real_path
+
+    text = "knowledge:\n  vault_mode: external\n  real_path: /home/me/agent-os/projects/x\n"
+    updated, localized = _localize_real_path(text)
+    assert not localized
+    assert updated == text
+
+
+def test_localize_real_path_is_idempotent():
+    """An already-relative real_path must not be rewritten again."""
+    from agent_knowledge.runtime.refresh import _localize_real_path
+
+    text = "knowledge:\n  vault_mode: local\n  real_path: ./bedrock\n"
+    assert _localize_real_path(text) == (text, False)
+
+
+def test_merge_preserves_commands_chained_onto_bedrock_hooks():
+    """A project that extended the bedrock hook must keep its half of the command."""
+    from agent_knowledge.runtime.refresh import _merge_claude_hooks
+
+    template = {"hooks": {"Stop": [{"matcher": "", "hooks": [{"type": "command", "command": "bedrock sync --project ."}]}]}}
+    current = {
+        "hooks": {
+            "Stop": [
+                {
+                    "matcher": "",
+                    "hooks": [{"type": "command", "command": "bedrock sync --project . && npm run notify"}],
+                }
+            ]
+        }
+    }
+    commands = [
+        h["command"] for g in _merge_claude_hooks(template, current)["hooks"]["Stop"] for h in g["hooks"]
+    ]
+    assert "bedrock sync --project . && npm run notify" in commands, "chained project command must survive"
+
+
+@pytest.mark.parametrize(
+    "stale",
+    [
+        "bedrock sync --project /home/other/code/proj",
+        "bedrock sync --project '/home/other/code/proj'",
+        "agent-knowledge sync --project /home/other/code/proj",
+        "bedrock sync --project .",
+    ],
+)
+def test_merge_replaces_every_generated_command_shape(stale: str):
+    """Commands bedrock itself generated (current or historical) must be replaced."""
+    from agent_knowledge.runtime.refresh import _merge_claude_hooks
+
+    template = {"hooks": {"Stop": [{"matcher": "", "hooks": [{"type": "command", "command": "bedrock sync --project ."}]}]}}
+    current = {"hooks": {"Stop": [{"matcher": "", "hooks": [{"type": "command", "command": stale}]}]}}
+    commands = [
+        h["command"] for g in _merge_claude_hooks(template, current)["hooks"]["Stop"] for h in g["hooks"]
+    ]
+    assert commands == ["bedrock sync --project ."], f"stale command not replaced: {stale}"
+
+
+def test_view_skips_browser_without_a_display(tmp_path: Path):
+    """view must print the path instead of failing when there is no display (SSH/headless)."""
+    import os
+
+    repo = _init_repo(tmp_path, "headless-view")
+    kh = tmp_path / "kh"
+    _run("init", "--repo", str(repo), "--knowledge-home", str(kh))
+
+    env = {k: v for k, v in os.environ.items() if k not in ("DISPLAY", "WAYLAND_DISPLAY")}
+    env["SSH_CONNECTION"] = "10.0.0.1 22 10.0.0.2 22"
+    r = subprocess.run(
+        [*BIN, "view", "--project", str(repo)],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        env=env,
+    )
+    assert r.returncode == 0, f"view must succeed headless: {r.stderr}"
+    assert "index.html" in r.stderr, "the path to open must be printed when the browser is skipped"
+
+
+def test_view_no_open_flag(tmp_path: Path):
+    """--no-open must generate the site without launching a browser."""
+    repo = _init_repo(tmp_path, "view-no-open")
+    kh = tmp_path / "kh"
+    _run("init", "--repo", str(repo), "--knowledge-home", str(kh))
+
+    r = _run("view", "--project", str(repo), "--no-open")
+    assert r.returncode == 0, f"view --no-open failed: {r.stderr}"
+    assert (repo / "bedrock" / "Views" / "site" / "index.html").is_file()
+
+
+def test_star_prompt_does_not_launch_a_browser_without_a_display(monkeypatch, tmp_path: Path):
+    """The one-time star prompt must not spawn a GUI browser on a headless/SSH box.
+
+    A failed launcher writes its errors after the shell prompt has returned and
+    scribbles over the next prompt, which is the whole point of the display guard.
+    """
+    import io
+    import webbrowser
+
+    from agent_knowledge import cli
+
+    opened: list[str] = []
+    monkeypatch.setattr(webbrowser, "open", lambda url, *a, **k: opened.append(url))
+    monkeypatch.setattr(cli, "_STAR_MARKER", tmp_path / "starred")
+    monkeypatch.setattr(cli.click, "confirm", lambda *a, **k: True)
+    monkeypatch.setenv("SSH_CONNECTION", "10.0.0.1 22 10.0.0.2 22")
+
+    class _Tty(io.StringIO):
+        def isatty(self) -> bool:
+            return True
+
+    monkeypatch.setattr(cli.sys, "stderr", _Tty())
+
+    cli._maybe_star()
+
+    assert opened == [], "the star prompt must go through the display-guarded opener"
+
+
+def test_star_prompt_opens_the_repo_when_a_display_exists(monkeypatch, tmp_path: Path):
+    """With a display the prompt must still open the repo page."""
+    import io
+
+    from agent_knowledge import cli
+    from agent_knowledge.runtime import shell
+
+    launched: list[tuple] = []
+    monkeypatch.setattr(shell, "has_display", lambda: True)
+    monkeypatch.setattr(shell.subprocess, "run", lambda *a, **k: launched.append(a))
+    monkeypatch.setattr(shell.os, "startfile", lambda target: launched.append((target,)), raising=False)
+    monkeypatch.setattr(cli, "_STAR_MARKER", tmp_path / "starred")
+    monkeypatch.setattr(cli.click, "confirm", lambda *a, **k: True)
+
+    class _Tty(io.StringIO):
+        def isatty(self) -> bool:
+            return True
+
+    monkeypatch.setattr(cli.sys, "stderr", _Tty())
+
+    cli._maybe_star()
+
+    assert any(cli._REPO_URL in str(call) for call in launched), "repo page must open when a display exists"
+
+
+def test_init_gitignores_the_per_machine_sync_artifact(tmp_path: Path):
+    """.cursor/knowledge-sync.last.json records an absolute project path per machine.
+
+    Sharing it makes the repo hostile to a second developer, so init must exclude it.
+    """
+    repo = _init_repo(tmp_path, "gitignore-artifact")
+    kh = tmp_path / "kh"
+    _run("init", "--repo", str(repo), "--knowledge-home", str(kh))
+
+    assert ".cursor/knowledge-sync.last.json" in (repo / ".gitignore").read_text()
+
+
+def test_refresh_system_adds_gitignore_patterns_an_older_connect_missed(tmp_path: Path):
+    """A project connected by an older bedrock must pick up newly added patterns.
+
+    refresh-system runs every session, so it is the only place an existing
+    checkout can self-heal.
+    """
+    repo = _init_repo(tmp_path, "gitignore-selfheal")
+    kh = tmp_path / "kh"
+    _run("init", "--repo", str(repo), "--knowledge-home", str(kh))
+
+    gitignore = repo / ".gitignore"
+    gitignore.write_text(
+        "my-own-thing/\n\n"
+        "# bedrock: noisy auto-generated content excluded from git\n"
+        "bedrock/Evidence/raw/\n"
+        "bedrock/Views/site/\n"
+    )
+
+    r = _run("refresh-system", "--project", str(repo))
+    assert r.returncode == 0, f"refresh-system failed: {r.stderr}"
+
+    text = gitignore.read_text()
+    assert ".cursor/knowledge-sync.last.json" in text, "missing pattern must be added"
+    assert "my-own-thing/" in text, "project's own patterns must survive"
+    assert text.count("bedrock/Evidence/raw/") == 1, "existing patterns must not be duplicated"
+
+
+def test_refresh_system_leaves_a_complete_gitignore_alone(tmp_path: Path):
+    """Refreshing twice must not keep rewriting .gitignore."""
+    repo = _init_repo(tmp_path, "gitignore-idempotent")
+    kh = tmp_path / "kh"
+    _run("init", "--repo", str(repo), "--knowledge-home", str(kh))
+
+    _run("refresh-system", "--project", str(repo))
+    first = (repo / ".gitignore").read_text()
+    _run("refresh-system", "--project", str(repo))
+    assert (repo / ".gitignore").read_text() == first
+
+
+def test_init_keeps_shared_integration_files_tracked(tmp_path: Path):
+    """Hook configs are portable now, so they stay shareable — only artifacts are ignored."""
+    repo = _init_repo(tmp_path, "gitignore-shared")
+    kh = tmp_path / "kh"
+    _run("init", "--repo", str(repo), "--knowledge-home", str(kh))
+
+    text = (repo / ".gitignore").read_text()
+    assert ".claude/settings.json" not in text
+    assert ".cursor/hooks.json" not in text
 
 
 def test_init_installs_claude_commands(tmp_path: Path):

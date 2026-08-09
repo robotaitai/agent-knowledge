@@ -364,9 +364,14 @@ def export_html(vault_dir: Path, output_path: Path | None = None, *, dry_run: bo
     return output_path, action
 
 
-def open_viewer(vault_dir: Path) -> None:
-    """Export HTML and open in the default browser."""
-    import webbrowser
+def open_viewer(vault_dir: Path) -> Path:
+    """Export HTML and open it in the default browser.
+
+    Returns the export path; on a headless box or over SSH the browser is
+    skipped, since the export itself is the part that matters.
+    """
+    from .shell import open_in_browser
 
     path, _ = export_html(vault_dir)
-    webbrowser.open(path.as_uri())
+    open_in_browser(path.as_uri())
+    return path
