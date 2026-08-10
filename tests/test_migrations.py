@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from agent_knowledge.runtime import migrations
 
 
@@ -140,10 +142,10 @@ def test_pending_returns_only_migrations_above_the_recorded_version(tmp_path: Pa
     )
     repo = _vault(tmp_path, layout="1")
 
-    applied = migrations.run_migrations(repo, dry_run=False, registry=registry, target=3)
+    run = migrations.run_migrations(repo, dry_run=False, registry=registry, target=3)
 
     assert calls == [2, 3], "only migrations above the recorded version may run"
-    assert [m.name for m in applied] == ["second", "third"]
+    assert [m.name for m in run.applied] == ["second", "third"]
 
 
 def test_migrations_run_in_ascending_order(tmp_path: Path):
@@ -170,15 +172,15 @@ def test_runner_stamps_the_target_version(tmp_path: Path):
     assert migrations.read_layout_version(repo) == 1
 
 
-def test_dry_run_neither_applies_nor_stamps(tmp_path: Path):
+def test_dry_run_passes_the_flag_and_does_not_stamp(tmp_path: Path):
     """--dry-run must report the plan without touching the vault."""
     calls = []
     registry = (migrations.Migration(1, "first", lambda repo, dry_run: calls.append(dry_run)),)
     repo = _vault(tmp_path)
 
-    applied = migrations.run_migrations(repo, dry_run=True, registry=registry, target=1)
+    run = migrations.run_migrations(repo, dry_run=True, registry=registry, target=1)
 
-    assert [m.name for m in applied] == ["first"], "the plan must still be reported"
+    assert [m.name for m in run.applied] == ["first"], "the plan must still be reported"
     assert calls == [True], "the migration must be told it is a dry run"
     assert migrations.read_layout_version(repo) == 0, "dry-run must not stamp"
 
@@ -189,22 +191,50 @@ def test_up_to_date_project_runs_nothing(tmp_path: Path):
     registry = (migrations.Migration(1, "first", lambda repo, dry_run: calls.append(1)),)
     repo = _vault(tmp_path, layout="1")
 
-    assert migrations.run_migrations(repo, dry_run=False, registry=registry, target=1) == []
+    assert migrations.run_migrations(repo, dry_run=False, registry=registry, target=1).applied == []
     assert calls == []
 
 
-def test_unstampable_vault_still_migrates_without_raising(tmp_path: Path):
+def test_version_advances_even_when_no_migration_is_pending(tmp_path: Path):
+    """A layout bump with nothing to do must still be recorded, or it never sticks."""
+    repo = _vault(tmp_path)
+
+    run = migrations.run_migrations(repo, dry_run=False, registry=(), target=1)
+
+    assert run.applied == []
+    assert run.stamped is True
+    assert migrations.read_layout_version(repo) == 1
+
+
+def test_unstampable_vault_reports_the_failure(tmp_path: Path):
     """A vault with no frontmatter cannot record the stamp, and replays next session.
 
     Idempotence is what makes that safe, so the runner reports the work it did
-    rather than raising out of the SessionStart hook.
+    rather than raising out of the SessionStart hook -- but it must say the
+    stamp did not land, so refresh.py has something to warn about.
     """
     calls = []
     registry = (migrations.Migration(1, "first", lambda repo, dry_run: calls.append(1)),)
     repo = _vault(tmp_path, frontmatter=False)
 
-    applied = migrations.run_migrations(repo, dry_run=False, registry=registry, target=1)
+    run = migrations.run_migrations(repo, dry_run=False, registry=registry, target=1)
 
-    assert [m.name for m in applied] == ["first"]
+    assert [m.name for m in run.applied] == ["first"]
     assert calls == [1]
+    assert run.stamped is False
+    assert migrations.read_layout_version(repo) == 0
+
+
+def test_a_failing_migration_leaves_the_stamp_unwritten(tmp_path: Path):
+    """The chain must replay next session, so the stamp may not run early."""
+
+    def boom(repo, dry_run):
+        raise RuntimeError("boom")
+
+    registry = (migrations.Migration(1, "first", boom),)
+    repo = _vault(tmp_path)
+
+    with pytest.raises(RuntimeError):
+        migrations.run_migrations(repo, dry_run=False, registry=registry, target=1)
+
     assert migrations.read_layout_version(repo) == 0

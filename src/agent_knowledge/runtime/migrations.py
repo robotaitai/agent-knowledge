@@ -3,6 +3,13 @@
 The package version and the layout version are deliberately separate. Most
 releases change no on-disk format and leave LAYOUT_VERSION alone; bumping it is
 an explicit act that says "an existing project needs work done to it".
+
+Failure handling is split. Reads degrade and a failed stamp is reported rather
+than raised, because this runs from the SessionStart hook. A failing *migration*
+is different: it propagates, stopping the chain with the stamp unwritten, so the
+next session replays from the last good version. Continuing past it would run
+migration N+1 against a vault that never finished N. `refresh.py` owns the
+try/except around this call, so one bad migration cannot take down a refresh.
 """
 
 from __future__ import annotations
@@ -17,16 +24,28 @@ LAYOUT_VERSION = 1
 
 
 class Migration(NamedTuple):
-    """One irreversible step from layout `version - 1` to `version`.
+    """One irreversible step to layout `version`, applied in ascending order.
 
-    `apply` must be idempotent: it runs from the SessionStart hook, and a crash
-    partway through a chain leaves the stamp unwritten, so the whole chain
-    re-runs on the next session.
+    `apply` must be safe to re-run and safe to resume after partial application.
+    A crash leaves the stamp unwritten, so the whole chain re-runs next session --
+    including the migration that crashed, from wherever it got to. Re-running a
+    completed migration and finishing a half-done one are both required.
     """
 
     version: int
     name: str
     apply: Callable[[Path, bool], None]
+
+
+class MigrationRun(NamedTuple):
+    """What a run did, and whether the result was recorded.
+
+    `stamped` is False when the version could not be written, which means the
+    work replays next session. Harmless but invisible, so the caller reports it.
+    """
+
+    applied: list[Migration]
+    stamped: bool
 
 
 def _status_path(repo_root: Path) -> Path:
@@ -91,12 +110,13 @@ def run_migrations(
     dry_run: bool,
     registry: Sequence[Migration] | None = None,
     target: int | None = None,
-) -> list[Migration]:
+) -> MigrationRun:
     """Apply every migration above the project's recorded version, in order.
 
-    Returns the migrations that were applied (or, under dry_run, would be).
-    `registry` and `target` are injectable so the ordering contract can be
-    tested without inventing real layout versions.
+    Reports the migrations applied (or, under dry_run, that would be) and whether
+    the new version was recorded. Raises whatever a migration raises. `registry`
+    and `target` are injectable so the ordering contract can be tested without
+    inventing real layout versions.
     """
     registry = MIGRATIONS if registry is None else registry
     target = LAYOUT_VERSION if target is None else target
@@ -106,17 +126,20 @@ def run_migrations(
         (m for m in registry if current < m.version <= target),
         key=lambda m: m.version,
     )
-    if not pending:
-        return []
 
+    # Stamping after applying is what makes a crash replay rather than skip.
     for migration in pending:
         migration.apply(repo_root, dry_run)
 
-    # A failed stamp is deliberately not fatal: migrations are idempotent, so an
-    # unstampable vault replays the chain rather than losing work, and raising
-    # here would break the agent session this runs from.
-    stamp_layout_version(repo_root, target, dry_run=dry_run)
-    return pending
+    # Stamps `target`, not the highest applied version: correct only because
+    # LAYOUT_VERSION is bumped in lockstep with adding a migration, so a version
+    # with no migration of its own still needs recording.
+    # `current < target` also prevents stamping a downgrade.
+    if current < target:
+        stamped = stamp_layout_version(repo_root, target, dry_run=dry_run)
+    else:
+        stamped = True
+    return MigrationRun(applied=pending, stamped=stamped)
 
 
 MIGRATIONS: tuple[Migration, ...] = ()
