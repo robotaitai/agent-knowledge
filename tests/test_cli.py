@@ -466,11 +466,10 @@ def test_search_prefers_memory(tmp_path: Path):
 
 def test_view_serve_serves_site_over_http(tmp_path: Path):
     """view --serve must serve index.html and its data files over 127.0.0.1."""
+    import http.client
     import os
     import socket
     import time
-    import urllib.error
-    import urllib.request
 
     repo = _init_repo(tmp_path, "view-serve")
     kh = tmp_path / "kh"
@@ -489,19 +488,36 @@ def test_view_serve_serves_site_over_http(tmp_path: Path):
         text=True,
         env=env,
     )
+
+    def fetch(name):
+        # http.client rather than urllib: urllib resolves system proxy settings,
+        # and on macOS that can route a 127.0.0.1 request away from the server.
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        try:
+            conn.request("GET", f"/{name}")
+            return conn.getresponse().status
+        finally:
+            conn.close()
+
     try:
         codes = {}
-        deadline = time.time() + 30
+        deadline = time.time() + 60
         while time.time() < deadline:
             try:
                 for name in ("index.html", "data/knowledge.json"):
-                    with urllib.request.urlopen(f"http://127.0.0.1:{port}/{name}", timeout=2) as resp:
-                        codes[name] = resp.status
+                    codes[name] = fetch(name)
                 break
-            except (urllib.error.URLError, OSError):
+            except OSError:
                 assert proc.poll() is None, f"server exited: {proc.communicate()[1]}"
                 time.sleep(0.5)
-        assert codes.get("index.html") == 200, "index.html must be served over HTTP"
+
+        if codes.get("index.html") != 200:
+            proc.terminate()
+            out, err = proc.communicate(timeout=10)
+            raise AssertionError(
+                f"index.html was not served over HTTP (codes={codes})\n"
+                f"--- server stdout ---\n{out}\n--- server stderr ---\n{err}"
+            )
         assert codes.get("data/knowledge.json") == 200, "site data must be served over HTTP"
     finally:
         proc.terminate()
