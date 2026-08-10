@@ -431,28 +431,8 @@ def _refresh_status_md(vault_dir: Path, version: str, *, dry_run: bool) -> dict[
     return {"target": "STATUS.md", "action": action, "detail": detail}
 
 
-def _localize_real_path(text: str) -> tuple[str, bool]:
-    """Rewrite an absolute `real_path` to `./bedrock` for local vaults.
-
-    In `vault_mode: local` the vault is always `<repo>/bedrock`, so an absolute
-    path only records which machine generated the file and breaks every other
-    clone. The rest of the file is already relative.
-    """
-    if not re.search(r"""^\s*vault_mode:\s*["']?local["']?\s*$""", text, re.MULTILINE):
-        return text, False
-    # Match the whole line, not a \S+ token: the paths this exists to fix are
-    # exactly the ones that may contain spaces or quotes.
-    m = re.search(r"^(\s*real_path:)[ \t]*(.*)$", text, re.MULTILINE)
-    if not m:
-        return text, False
-    value = m.group(2).strip().strip("\"'")
-    if not value or value.startswith((".", "$", "<")):
-        return text, False
-    return text[: m.start()] + f"{m.group(1)} ./bedrock" + text[m.end():], True
-
-
 def _refresh_project_yaml(repo_root: Path, version: str, *, dry_run: bool) -> dict[str, Any]:
-    """Update framework_version and de-absolutize real_path in .agent-project.yaml."""
+    """Update framework_version in .agent-project.yaml. Layout repairs are migrations."""
     target = repo_root / ".agent-project.yaml"
 
     if not target.is_file():
@@ -464,21 +444,12 @@ def _refresh_project_yaml(repo_root: Path, version: str, *, dry_run: bool) -> di
     if m:
         prior = m.group(1).strip().strip("\"'")
 
-    updated, localized = _localize_real_path(current)
-
-    if prior == version and not localized:
+    if prior == version:
         return {"target": ".agent-project.yaml", "action": "up-to-date", "detail": f"framework_version already {version}"}
 
-    if prior != version:
-        updated = _yaml_set(updated, "framework_version", version)
-
-    action = _write(target, updated, dry_run=dry_run)
-    details = []
-    if prior != version:
-        details.append(f"set framework_version: {version}" + (f" (was: {prior})" if prior else ""))
-    if localized:
-        details.append("real_path -> ./bedrock (portable across machines)")
-    return {"target": ".agent-project.yaml", "action": action, "detail": "; ".join(details)}
+    action = _write(target, _yaml_set(current, "framework_version", version), dry_run=dry_run)
+    detail = f"set framework_version: {version}" + (f" (was: {prior})" if prior else "")
+    return {"target": ".agent-project.yaml", "action": action, "detail": detail}
 
 
 def _refresh_gitignore(repo_root: Path, *, dry_run: bool) -> dict[str, Any]:
