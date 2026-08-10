@@ -2636,3 +2636,83 @@ def test_status_frontmatter_survives_doctor(tmp_path: Path):
     block = status.read_text(encoding="utf-8")[4:].split("\n---", 1)[0]
     assert block.count("custom_key:") == 1
     assert block.count("framework_version:") == 1
+
+
+def _common_lib() -> Path:
+    from agent_knowledge.runtime.paths import get_assets_dir
+
+    return get_assets_dir() / "scripts" / "lib" / "knowledge-common.sh"
+
+
+def _rewrite_status_via_shell(status: Path) -> None:
+    """Drive kc_status_load + kc_status_write directly, without a full CLI run."""
+    script = (
+        f'. "{_common_lib()}"\n'
+        f'STATUS_FILE="{status}"\n'
+        "kc_status_load\n"
+        "kc_status_write\n"
+    )
+    r = subprocess.run(["bash", "-c", script], capture_output=True, text=True, timeout=30)
+    assert r.returncode == 0, r.stderr
+
+
+def test_status_frontmatter_survives_a_crlf_file(tmp_path: Path):
+    """CRLF must not defeat the carry-through.
+
+    Git for Windows checks this file out with CRLF by default, and the awk
+    delimiter match used to see "---\\r" and bail, dropping every unmanaged key.
+    """
+    status = tmp_path / "bedrock" / "STATUS.md"
+    status.parent.mkdir(parents=True)
+    lf = (
+        "---\n"
+        "note_type: knowledge-status\n"
+        "project: crlf-repo\n"
+        "onboarding: complete\n"
+        "framework_version: 0.4.17\n"
+        "last_system_refresh: 2026-08-11T00:00:00Z\n"
+        "layout_version: 7\n"
+        'custom_key: spaced: value/with, "quotes"\n'
+        "---\n"
+        "\n"
+        "# Knowledge Status: crlf-repo\n"
+    )
+    status.write_bytes(lf.replace("\n", "\r\n").encode("utf-8"))
+
+    _rewrite_status_via_shell(status)
+
+    text = status.read_text(encoding="utf-8")
+    block = text[4:].split("\n---", 1)[0]
+    lines = [ln.rstrip("\r") for ln in block.splitlines()]
+    assert "layout_version: 7" in lines
+    assert 'custom_key: spaced: value/with, "quotes"' in lines
+    assert "framework_version: 0.4.17" in lines
+    assert "last_system_refresh: 2026-08-11T00:00:00Z" in lines
+
+    # And a second rewrite of the now-LF file must not duplicate them.
+    _rewrite_status_via_shell(status)
+    block = status.read_text(encoding="utf-8")[4:].split("\n---", 1)[0]
+    assert block.count("layout_version:") == 1
+    assert block.count("custom_key:") == 1
+
+
+def test_status_frontmatter_managed_key_lists_agree():
+    """The awk skip-list and the printf emit-list are one schema in two copies.
+
+    Adding a field to one and not the other produces a permanently duplicated
+    YAML key, which strict parsers reject and kc_yaml_leaf_value reads first-wins.
+    """
+    text = _common_lib().read_text(encoding="utf-8")
+
+    awk_list = " ".join(re.findall(r'managed_keys\s*=\s*(?:managed_keys\s*)?"([^"]*)"', text))
+    awk_keys = set(awk_list.split())
+    assert awk_keys, "could not find the awk managed-key list"
+
+    start = text.index("kc_status_write() {")
+    end = text.index("""printf '%s\\n\\n' '---'""", start)
+    printf_keys = set(re.findall(r"^\s*printf '([A-Za-z_][A-Za-z0-9_]*):", text[start:end], re.M))
+    assert printf_keys, "could not find the emitted frontmatter fields"
+
+    # 'profile' is the legacy alias of profile_hint: skipped on read, never emitted.
+    assert awk_keys - printf_keys == {"profile"}
+    assert printf_keys - awk_keys == set()

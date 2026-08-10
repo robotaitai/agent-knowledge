@@ -842,16 +842,29 @@ kc_status_extra_frontmatter() {
             for (i in managed) known[managed[i]] = 1
             keep = 0
         }
-        NR == 1 { if ($0 != "---") exit; next }
-        $0 == "---" { exit }
         {
-            if (match($0, /^[A-Za-z_][A-Za-z0-9_.-]*:/)) {
-                key = substr($0, 1, RLENGTH - 1)
+            # Git for Windows checks this file out with CRLF, and the rest of
+            # this function writes LF, so drop the terminator on both the match
+            # and the copy we re-emit. Everything else in the line is untouched.
+            line = $0
+            sub(/\r$/, "", line)
+        }
+        NR == 1 {
+            # A UTF-8 BOM sits in front of the opening delimiter. Stripping any
+            # leading non-dash bytes removes it whatever the locale decodes it as.
+            sub(/^[^-]+/, "", line)
+            if (line != "---") exit
+            next
+        }
+        line == "---" { exit }
+        {
+            if (match(line, /^[A-Za-z_][A-Za-z0-9_.-]*:/)) {
+                key = substr(line, 1, RLENGTH - 1)
                 keep = (!(key in known) && !(key in seen))
                 seen[key] = 1
             }
             # Non-key lines belong to whichever key preceded them.
-            if (keep) print $0
+            if (keep) print line
         }
     ' "$STATUS_FILE"
 }

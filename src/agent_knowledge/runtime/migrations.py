@@ -119,7 +119,9 @@ def stamp_layout_version(repo_root: Path, version: int, *, dry_run: bool) -> boo
         return read_layout_version(repo_root) == version
     if dry_run:
         return True
-    _status_path(repo_root).write_text(updated, encoding="utf-8")
+    # newline="\n" pins LF; the default would rewrite STATUS.md as CRLF on
+    # Windows, where the shell rewrite of the same frontmatter emits LF.
+    _status_path(repo_root).write_text(updated, encoding="utf-8", newline="\n")
     return True
 
 
