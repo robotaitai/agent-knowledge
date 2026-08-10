@@ -393,6 +393,28 @@ def doctor(project: str, dry_run: bool, json_mode: bool) -> None:
             )
         click.echo("", err=True)
 
+    # Layout-version check -- which side of the version gap this install is on
+    if not json_mode:
+        from agent_knowledge.runtime.migrations import LAYOUT_VERSION, read_layout_version
+
+        project_layout = read_layout_version(repo_root)
+        if project_layout > LAYOUT_VERSION:
+            click.secho(
+                f"Warning: project layout {project_layout} is newer than this install "
+                f"({LAYOUT_VERSION}). Run: pip install -U project-bedrock",
+                fg="yellow",
+                err=True,
+            )
+            click.echo("", err=True)
+        elif project_layout < LAYOUT_VERSION:
+            click.secho(
+                f"Warning: project layout {project_layout} is behind this install "
+                f"({LAYOUT_VERSION}). Run: bedrock refresh-system",
+                fg="yellow",
+                err=True,
+            )
+            click.echo("", err=True)
+
     # Cursor integration health check
     cursor_health = check_cursor_integration(repo_root)
     if not cursor_health["healthy"] and not json_mode:
@@ -1097,6 +1119,15 @@ def refresh_system(project: str, dry_run: bool, json_mode: bool, force: bool) ->
         click.echo(json_mod.dumps(result, indent=2))
         return
 
+    if result["action"] == "blocked":
+        for w in result.get("warnings", []):
+            click.secho(f"Warning: {w}", fg="yellow", err=True)
+        click.echo("", err=True)
+        click.echo("No files were changed.", err=True)
+        # Deliberately exit 0: this runs from the SessionStart hook, joined by
+        # &&, and a non-zero exit would degrade every session in the repo.
+        return
+
     action = result["action"]
     version = result["framework_version"]
     prior = result.get("prior_version")
@@ -1106,6 +1137,14 @@ def refresh_system(project: str, dry_run: bool, json_mode: bool, force: bool) ->
     if not dry_run:
         if action == "up-to-date":
             click.secho(f"Up to date. (framework v{version})", bold=True, err=True)
+        elif action == "degraded":
+            # Something below failed, so do not headline this as a clean refresh.
+            click.secho(
+                f"Refresh incomplete (framework v{version}) -- see errors below.",
+                bold=True,
+                fg="yellow",
+                err=True,
+            )
         else:
             label = "dry-run preview" if dry_run else f"Refreshed to v{version}"
             if prior and prior != version:
@@ -1131,6 +1170,8 @@ def refresh_system(project: str, dry_run: bool, json_mode: bool, force: bool) ->
             click.echo(f"  skip     {target}  ({detail})", err=True)
         elif act == "warn":
             click.secho(f"  warn     {target}  ({detail})", fg="yellow", err=True)
+        elif act == "failed":
+            click.secho(f"  failed   {target}  ({detail})", fg="red", err=True)
 
     if warnings:
         click.echo("", err=True)

@@ -2538,3 +2538,45 @@ def test_absorb_skips_vault_files(tmp_path: Path):
     if imports_dir.exists():
         files = [f.name for f in imports_dir.glob("*.md")]
         assert not any("PROJECT" in f or "MEMORY" in f for f in files)
+
+
+def _set_layout_version(repo: Path, value: int) -> None:
+    """Write layout_version into the vault's STATUS.md frontmatter."""
+    status = repo / "bedrock" / "STATUS.md"
+    text = status.read_text()
+    end = text.find("\n---", 3)
+    status.write_text(f"{text[:end]}\nlayout_version: {value}{text[end:]}", encoding="utf-8")
+
+
+def test_refresh_system_exits_zero_when_blocked_by_a_newer_layout(tmp_path: Path):
+    """A blocked refresh must warn and exit 0.
+
+    It runs from the SessionStart hook joined by &&, so a non-zero exit degrades
+    every agent session in the repo -- worse than the stale layout it reports.
+    """
+    from agent_knowledge.runtime.migrations import LAYOUT_VERSION
+
+    repo = _init_repo(tmp_path, "layout-newer")
+    kh = tmp_path / "kh"
+    _run("init", "--repo", str(repo), "--knowledge-home", str(kh))
+    _set_layout_version(repo, LAYOUT_VERSION + 1)
+
+    r = _run("refresh-system", "--project", str(repo))
+
+    assert r.returncode == 0, f"a blocked refresh must not fail the SessionStart hook: {r.stderr}"
+    assert "pip install -U project-bedrock" in r.stderr
+    assert "Refreshed to v" not in r.stderr, "a blocked run must not claim it refreshed anything"
+
+
+def test_doctor_warns_when_the_project_layout_is_newer(tmp_path: Path):
+    """doctor must tell you which side of the version gap you are on."""
+    from agent_knowledge.runtime.migrations import LAYOUT_VERSION
+
+    repo = _init_repo(tmp_path, "layout-doctor")
+    kh = tmp_path / "kh"
+    _run("init", "--repo", str(repo), "--knowledge-home", str(kh))
+    _set_layout_version(repo, LAYOUT_VERSION + 1)
+
+    r = _run("doctor", "--project", str(repo))
+
+    assert "pip install -U project-bedrock" in r.stderr
