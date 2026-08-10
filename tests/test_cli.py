@@ -1930,7 +1930,7 @@ def test_refresh_system_localizes_real_path(tmp_path: Path):
 )
 def test_localize_real_path_handles_every_absolute_shape(value: str):
     """Absolute real_path values must localize regardless of spaces or quoting."""
-    from agent_knowledge.runtime.migrations import _localize_real_path
+    from agent_knowledge.runtime.refresh import _localize_real_path
 
     text = f"knowledge:\n  vault_mode: local\n  real_path: {value}\n  ignore_file: ./x\n"
     updated, localized = _localize_real_path(text)
@@ -1941,7 +1941,7 @@ def test_localize_real_path_handles_every_absolute_shape(value: str):
 
 def test_localize_real_path_leaves_external_vaults_alone():
     """External vaults legitimately point outside the repo and must not be rewritten."""
-    from agent_knowledge.runtime.migrations import _localize_real_path
+    from agent_knowledge.runtime.refresh import _localize_real_path
 
     text = "knowledge:\n  vault_mode: external\n  real_path: /home/me/agent-os/projects/x\n"
     updated, localized = _localize_real_path(text)
@@ -1951,7 +1951,7 @@ def test_localize_real_path_leaves_external_vaults_alone():
 
 def test_localize_real_path_is_idempotent():
     """An already-relative real_path must not be rewritten again."""
-    from agent_knowledge.runtime.migrations import _localize_real_path
+    from agent_knowledge.runtime.refresh import _localize_real_path
 
     text = "knowledge:\n  vault_mode: local\n  real_path: ./bedrock\n"
     assert _localize_real_path(text) == (text, False)

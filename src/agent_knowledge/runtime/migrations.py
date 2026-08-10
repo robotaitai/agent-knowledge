@@ -4,24 +4,36 @@ The package version and the layout version are deliberately separate. Most
 releases change no on-disk format and leave LAYOUT_VERSION alone; bumping it is
 an explicit act that says "an existing project needs work done to it".
 
+What belongs here, and what does not. A migration is for a one-time,
+irreversible change to the on-disk layout. It is not for a value that other
+writers can regress -- an older CLI on a teammate's machine, or a bad merge.
+Those need an unconditional repair on every refresh, as `_refresh_gitignore` and
+the hook-command merge do, because a version stamp would wrongly declare them
+permanently fixed. STATUS.md is git-tracked, so the stamp travels to every clone
+and silences the repair everywhere at once.
+
 Failure handling is split. Reads degrade and a failed stamp is reported rather
 than raised, because this runs from the SessionStart hook. A failing *migration*
 is different: it propagates, stopping the chain with the stamp unwritten, so the
 next session replays from the last good version. Continuing past it would run
 migration N+1 against a vault that never finished N. `refresh.py` owns the
 try/except around this call, so one bad migration cannot take down a refresh.
+
+That asymmetry constrains how a migration reads files. Catch FileNotFoundError
+when absence is legitimately nothing to do, and let every other OSError
+propagate. A blanket `except OSError: return` conflates "no file" with "cannot
+read it right now" and the chain stamps anyway, so the repair never retries.
 """
 
 from __future__ import annotations
 
-import re
 from pathlib import Path
 from typing import Callable, NamedTuple, Sequence
 
 from agent_knowledge.runtime.frontmatter import fm_get, fm_set
 
 # Bump only when the on-disk layout changes, and add a Migration for it.
-LAYOUT_VERSION = 1
+LAYOUT_VERSION = 0
 
 
 class Migration(NamedTuple):
@@ -143,42 +155,6 @@ def run_migrations(
     return MigrationRun(applied=pending, stamped=stamped)
 
 
-def _localize_real_path(text: str) -> tuple[str, bool]:
-    """Rewrite an absolute `real_path` to `./bedrock` for local vaults.
-
-    In `vault_mode: local` the vault is always `<repo>/bedrock`, so an absolute
-    path only records which machine generated the file and breaks every other
-    clone. The rest of the file is already relative.
-    """
-    if not re.search(r"""^\s*vault_mode:\s*["']?local["']?\s*$""", text, re.MULTILINE):
-        return text, False
-    # Match the whole line, not a \S+ token: the paths this exists to fix are
-    # exactly the ones that may contain spaces or quotes.
-    m = re.search(r"^(\s*real_path:)[ \t]*(.*)$", text, re.MULTILINE)
-    if not m:
-        return text, False
-    value = m.group(2).strip().strip("\"'")
-    if not value or value.startswith((".", "$", "<")):
-        return text, False
-    return text[: m.start()] + f"{m.group(1)} ./bedrock" + text[m.end():], True
-
-
-def _migrate_real_path_to_relative(repo_root: Path, dry_run: bool) -> None:
-    """Layout 1: `.agent-project.yaml` records real_path relatively for local vaults.
-
-    An absolute path only records which machine generated the file and breaks
-    every other clone.
-    """
-    target = repo_root / ".agent-project.yaml"
-    try:
-        current = target.read_text(encoding="utf-8", errors="replace")
-    except OSError:
-        return
-    updated, localized = _localize_real_path(current)
-    if localized and not dry_run:
-        target.write_text(updated, encoding="utf-8")
-
-
-MIGRATIONS: tuple[Migration, ...] = (
-    Migration(1, "real_path -> ./bedrock (portable across machines)", _migrate_real_path_to_relative),
-)
+# No layout migration exists yet. The mechanism above is deliberately shipped
+# empty: LAYOUT_VERSION stays 0 until a real on-disk layout change needs one.
+MIGRATIONS: tuple[Migration, ...] = ()

@@ -240,81 +240,28 @@ def test_a_failing_migration_leaves_the_stamp_unwritten(tmp_path: Path):
     assert migrations.read_layout_version(repo) == 0
 
 
+def test_the_shipped_registry_is_a_no_op_on_an_unstamped_vault(tmp_path: Path):
+    """No layout migration exists yet, so a real run must touch nothing at all.
+
+    In particular it must not stamp: a project left unstamped is what makes the
+    first real migration run everywhere the day LAYOUT_VERSION is bumped.
+    """
+    repo = _vault(tmp_path)
+    before = (repo / "bedrock" / "STATUS.md").read_text()
+
+    run = migrations.run_migrations(repo, dry_run=False)
+
+    assert run.applied == []
+    assert run.stamped is True
+    assert (repo / "bedrock" / "STATUS.md").read_text() == before
+
+
 def test_registry_versions_are_unique_and_cover_the_layout_version():
     """A duplicate or skipped version silently breaks ordering."""
+    # Trivially true at LAYOUT_VERSION 0; load-bearing the moment someone bumps it.
     versions = [m.version for m in migrations.MIGRATIONS]
     assert versions == sorted(set(versions)), "versions must be unique and ordered"
     assert versions == list(range(1, migrations.LAYOUT_VERSION + 1)), (
         "every layout version from 1 to LAYOUT_VERSION needs exactly one migration"
     )
 
-
-def test_migration_1_localizes_an_absolute_real_path(tmp_path: Path):
-    """The portability repair becomes layout migration 1."""
-    repo = _vault(tmp_path)
-    project_yaml = repo / ".agent-project.yaml"
-    project_yaml.write_text(
-        "knowledge:\n"
-        "  vault_mode: local\n"
-        "  real_path: /home/someone/code/proj/bedrock\n"
-        "  ignore_file: ./.agentknowledgeignore\n",
-        encoding="utf-8",
-    )
-
-    migrations.run_migrations(repo, dry_run=False)
-
-    text = project_yaml.read_text()
-    assert "real_path: ./bedrock" in text
-    assert "ignore_file: ./.agentknowledgeignore" in text, "neighbouring keys must survive"
-    assert migrations.read_layout_version(repo) == migrations.LAYOUT_VERSION
-
-
-def test_migration_1_leaves_an_external_vault_alone(tmp_path: Path):
-    """An external vault legitimately points outside the repo."""
-    repo = _vault(tmp_path)
-    project_yaml = repo / ".agent-project.yaml"
-    original = "knowledge:\n  vault_mode: external\n  real_path: /home/me/agent-os/projects/x\n"
-    project_yaml.write_text(original, encoding="utf-8")
-
-    migrations.run_migrations(repo, dry_run=False)
-
-    assert project_yaml.read_text() == original
-
-
-def test_migration_1_is_idempotent(tmp_path: Path):
-    """Re-running the chain on an already-migrated vault must change nothing."""
-    repo = _vault(tmp_path)
-    project_yaml = repo / ".agent-project.yaml"
-    project_yaml.write_text(
-        "knowledge:\n  vault_mode: local\n  real_path: /abs/proj/bedrock\n", encoding="utf-8"
-    )
-
-    migrations.run_migrations(repo, dry_run=False)
-    first = project_yaml.read_text()
-    migrations.stamp_layout_version(repo, 0, dry_run=False)  # force a re-run
-    migrations.run_migrations(repo, dry_run=False)
-
-    assert project_yaml.read_text() == first
-
-
-def test_migration_1_respects_dry_run(tmp_path: Path):
-    """A dry run must report the migration without touching .agent-project.yaml."""
-    repo = _vault(tmp_path)
-    project_yaml = repo / ".agent-project.yaml"
-    original = "knowledge:\n  vault_mode: local\n  real_path: /abs/proj/bedrock\n"
-    project_yaml.write_text(original, encoding="utf-8")
-
-    result = migrations.run_migrations(repo, dry_run=True)
-
-    assert [m.version for m in result.applied] == [1]
-    assert project_yaml.read_text() == original
-
-
-def test_migration_1_tolerates_a_missing_project_file(tmp_path: Path):
-    """A vault without .agent-project.yaml must migrate and stamp without raising."""
-    repo = _vault(tmp_path)
-
-    result = migrations.run_migrations(repo, dry_run=False)
-
-    assert [m.version for m in result.applied] == [1]
-    assert migrations.read_layout_version(repo) == migrations.LAYOUT_VERSION
