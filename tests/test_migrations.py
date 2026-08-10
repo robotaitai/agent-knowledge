@@ -265,3 +265,99 @@ def test_registry_versions_are_unique_and_cover_the_layout_version():
         "every layout version from 1 to LAYOUT_VERSION needs exactly one migration"
     )
 
+
+# --------------------------------------------------------------------------- #
+# Wiring into refresh-system                                                   #
+# --------------------------------------------------------------------------- #
+
+
+def test_refresh_refuses_to_downgrade_a_newer_project(tmp_path: Path):
+    """An older CLI must never rewrite a newer project's files.
+
+    refresh-system runs from the SessionStart hook, so without this a teammate
+    on an older bedrock reverts the layout on every single session.
+    """
+    from agent_knowledge.runtime.refresh import run_refresh
+
+    repo = _vault(tmp_path, layout=str(migrations.LAYOUT_VERSION + 1))
+    project_yaml = repo / ".agent-project.yaml"
+    project_yaml.write_text('framework_version: "0.0.1"\n', encoding="utf-8")
+
+    result = run_refresh(repo, dry_run=False)
+
+    assert result["action"] == "blocked"
+    assert result["layout_version"] == migrations.LAYOUT_VERSION
+    assert result["project_layout_version"] == migrations.LAYOUT_VERSION + 1
+    assert any("pip install -U project-bedrock" in w for w in result["warnings"])
+    assert '"0.0.1"' in project_yaml.read_text(), "a blocked refresh must write nothing at all"
+
+
+def test_refresh_reports_applied_migrations(tmp_path: Path, monkeypatch):
+    """Applied migrations must show up as changes so the user can see what happened."""
+    from agent_knowledge.runtime.refresh import run_refresh
+
+    seen = []
+    monkeypatch.setattr(migrations, "LAYOUT_VERSION", 1)
+    monkeypatch.setattr(
+        migrations,
+        "MIGRATIONS",
+        (migrations.Migration(1, "demo step", lambda repo, dry_run: seen.append(repo)),),
+    )
+
+    repo = _vault(tmp_path)
+    result = run_refresh(repo, dry_run=False)
+
+    assert seen, "the migration must actually run"
+    details = [c["detail"] for c in result["changes"] if c["target"] == "layout migration"]
+    assert details == ["1: demo step"]
+    assert migrations.read_layout_version(repo) == 1
+
+
+def test_refresh_survives_a_failing_migration(tmp_path: Path, monkeypatch):
+    """One bad migration must not take down the whole refresh or the session."""
+    from agent_knowledge.runtime.refresh import run_refresh
+
+    def boom(repo, dry_run):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(migrations, "LAYOUT_VERSION", 1)
+    monkeypatch.setattr(migrations, "MIGRATIONS", (migrations.Migration(1, "bad step", boom),))
+
+    repo = _vault(tmp_path)
+    result = run_refresh(repo, dry_run=False)
+
+    assert any("boom" in w for w in result["warnings"]), "the failure must be reported"
+    assert any(c["action"] == "failed" for c in result["changes"])
+    assert migrations.read_layout_version(repo) == 0, "a failed chain must not stamp"
+
+
+def test_refresh_warns_when_the_layout_version_cannot_be_recorded(tmp_path: Path, monkeypatch):
+    """A vault that cannot be stamped replays forever; that must not be silent."""
+    from agent_knowledge.runtime.refresh import run_refresh
+
+    monkeypatch.setattr(migrations, "LAYOUT_VERSION", 1)
+    monkeypatch.setattr(
+        migrations,
+        "MIGRATIONS",
+        (migrations.Migration(1, "demo step", lambda repo, dry_run: None),),
+    )
+
+    repo = _vault(tmp_path)
+    # A STATUS.md with no frontmatter cannot carry the stamp.
+    (repo / "bedrock" / "STATUS.md").write_text("# Status\n", encoding="utf-8")
+
+    result = run_refresh(repo, dry_run=False)
+
+    assert any("replay" in w for w in result["warnings"])
+
+
+def test_refresh_at_the_same_layout_reports_both_versions(tmp_path: Path):
+    """The normal path must still report the versions for doctor and the CLI."""
+    from agent_knowledge.runtime.refresh import run_refresh
+
+    repo = _vault(tmp_path)
+    result = run_refresh(repo, dry_run=False)
+
+    assert result["layout_version"] == migrations.LAYOUT_VERSION
+    assert result["project_layout_version"] == migrations.LAYOUT_VERSION
+    assert result["action"] != "blocked"

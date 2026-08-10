@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any
 
 from agent_knowledge import __version__
+from agent_knowledge.runtime import migrations as _migrations
 from agent_knowledge.runtime.frontmatter import fm_get, fm_set
 from agent_knowledge.runtime.paths import get_assets_dir
 
@@ -779,8 +780,49 @@ def run_refresh(
     status_text = _read_text(vault_dir / "STATUS.md")
     prior_version = _fm_get(status_text, "framework_version") or None
 
+    project_layout = _migrations.read_layout_version(repo_root)
+
     changes: list[dict[str, Any]] = []
     warnings: list[str] = []
+
+    if project_layout > _migrations.LAYOUT_VERSION:
+        # Write nothing: an older CLI would revert a newer project's layout, and
+        # this runs from SessionStart, so it would happen on every session.
+        warnings.append(
+            f"This project uses bedrock layout {project_layout}; this install understands "
+            f"{_migrations.LAYOUT_VERSION}. Run: pip install -U project-bedrock"
+        )
+        return {
+            "action": "blocked",
+            "framework_version": version,
+            "prior_version": prior_version,
+            "layout_version": _migrations.LAYOUT_VERSION,
+            "project_layout_version": project_layout,
+            "dry_run": dry_run,
+            "integrations_detected": [k for k, v in detected.items() if v],
+            "changes": [],
+            "warnings": warnings,
+        }
+
+    try:
+        run = _migrations.run_migrations(repo_root, dry_run=dry_run)
+    except Exception as exc:
+        # The chain stopped and left the version unstamped, so it replays next
+        # session. Templates do not depend on the layout, so the refresh goes on.
+        warnings.append(f"Layout migration failed: {exc}")
+        changes.append({"target": "layout migration", "action": "failed", "detail": str(exc)})
+    else:
+        for applied in run.applied:
+            changes.append({
+                "target": "layout migration",
+                "action": "dry-run" if dry_run else "updated",
+                "detail": f"{applied.version}: {applied.name}",
+            })
+        if run.applied and not run.stamped and not dry_run:
+            warnings.append(
+                "Could not record layout_version in bedrock/STATUS.md; "
+                "these migrations will replay next session."
+            )
 
     # AGENTS.md — the primary agent contract file
     r = _refresh_agents_md(repo_root, dry_run=dry_run)
@@ -857,6 +899,8 @@ def run_refresh(
         "action": action,
         "framework_version": version,
         "prior_version": prior_version,
+        "layout_version": _migrations.LAYOUT_VERSION,
+        "project_layout_version": max(project_layout, _migrations.LAYOUT_VERSION),
         "dry_run": dry_run,
         "integrations_detected": [k for k, v in detected.items() if v],
         "changes": changes,
