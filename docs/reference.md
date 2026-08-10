@@ -114,6 +114,32 @@ git commit -am "fix: portable bedrock integration files"
 Project-added hooks, `permissions`, and `env` in `.claude/settings.json` are
 preserved; only bedrock's own hook commands are rewritten.
 
+### Layout versions
+
+`bedrock/STATUS.md` records a `layout_version` -- an integer describing the
+on-disk shape of the vault, separate from `framework_version`. Most releases
+change no layout and leave it alone.
+
+- **Your install is newer than the project:** `refresh-system` applies the
+  pending migrations in order and records the new version. This happens
+  automatically from the `SessionStart` hook.
+- **Your install is older than the project:** `refresh-system` writes nothing
+  and tells you to upgrade. Without this, the older teammate would revert the
+  layout on every session and the newer one would restore it, forever.
+
+A blocked refresh still exits 0, because it runs from a session hook where a
+non-zero exit would take the whole session down with it. `bedrock doctor`
+reports which side of the gap you are on.
+
+Migrations only ever move data; nothing is deleted, so
+`refresh-system --dry-run` is safe to inspect first. A migration that fails
+stops the chain and leaves the version unrecorded, so the next session retries
+from the last good state -- the rest of the refresh still runs, and the failure
+is reported rather than swallowed.
+
+The guard only protects from 0.4.17 onward: an older install has no notion of
+layout versions and will not honour it.
+
 ## Custom knowledge home
 
 ```bash
