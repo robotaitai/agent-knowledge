@@ -30,6 +30,14 @@ def _vault(
     return repo
 
 
+def _snapshot(root: Path) -> dict:
+    """Every path under root with its bytes, for proving nothing was written."""
+    return {
+        str(p.relative_to(root)): (p.read_bytes() if p.is_file() else None)
+        for p in sorted(root.rglob("*"))
+    }
+
+
 # --------------------------------------------------------------------------- #
 # Reading                                                                      #
 # --------------------------------------------------------------------------- #
@@ -280,8 +288,11 @@ def test_refresh_refuses_to_downgrade_a_newer_project(tmp_path: Path):
     from agent_knowledge.runtime.refresh import run_refresh
 
     repo = _vault(tmp_path, layout=str(migrations.LAYOUT_VERSION + 1))
-    project_yaml = repo / ".agent-project.yaml"
-    project_yaml.write_text('framework_version: "0.0.1"\n', encoding="utf-8")
+    (repo / ".agent-project.yaml").write_text('framework_version: "0.0.1"\n', encoding="utf-8")
+    # AGENTS.md is the first thing a refresh rewrites, so it is the file that
+    # catches a guard placed even one line too late.
+    (repo / "AGENTS.md").write_text("# stale header\n", encoding="utf-8")
+    before = _snapshot(repo)
 
     result = run_refresh(repo, dry_run=False)
 
@@ -289,7 +300,7 @@ def test_refresh_refuses_to_downgrade_a_newer_project(tmp_path: Path):
     assert result["layout_version"] == migrations.LAYOUT_VERSION
     assert result["project_layout_version"] == migrations.LAYOUT_VERSION + 1
     assert any("pip install -U project-bedrock" in w for w in result["warnings"])
-    assert '"0.0.1"' in project_yaml.read_text(), "a blocked refresh must write nothing at all"
+    assert _snapshot(repo) == before, "a blocked refresh must write nothing at all"
 
 
 def test_refresh_reports_applied_migrations(tmp_path: Path, monkeypatch):
@@ -327,8 +338,11 @@ def test_refresh_survives_a_failing_migration(tmp_path: Path, monkeypatch):
     result = run_refresh(repo, dry_run=False)
 
     assert any("boom" in w for w in result["warnings"]), "the failure must be reported"
+    assert any("RuntimeError" in w for w in result["warnings"]), "the exception type must survive"
     assert any(c["action"] == "failed" for c in result["changes"])
+    assert result["action"] == "degraded", "a broken migration is not a successful refresh"
     assert migrations.read_layout_version(repo) == 0, "a failed chain must not stamp"
+    assert result["project_layout_version"] == 0, "an unstamped project must not report the target"
 
 
 def test_refresh_warns_when_the_layout_version_cannot_be_recorded(tmp_path: Path, monkeypatch):
@@ -351,13 +365,38 @@ def test_refresh_warns_when_the_layout_version_cannot_be_recorded(tmp_path: Path
     assert any("replay" in w for w in result["warnings"])
 
 
-def test_refresh_at_the_same_layout_reports_both_versions(tmp_path: Path):
-    """The normal path must still report the versions for doctor and the CLI."""
+def test_refresh_dry_run_does_not_apply_migrations(tmp_path: Path, monkeypatch):
+    """--dry-run must reach the migration, not just the refreshers."""
     from agent_knowledge.runtime.refresh import run_refresh
 
+    seen = []
+    monkeypatch.setattr(migrations, "LAYOUT_VERSION", 1)
+    monkeypatch.setattr(
+        migrations,
+        "MIGRATIONS",
+        (migrations.Migration(1, "demo step", lambda repo, dry_run: seen.append(dry_run)),),
+    )
+
     repo = _vault(tmp_path)
+    result = run_refresh(repo, dry_run=True)
+
+    assert seen == [True], "dry_run must be threaded through to the migration"
+    assert migrations.read_layout_version(repo) == 0
+    assert any(c["action"] == "dry-run" for c in result["changes"])
+
+
+def test_refresh_at_the_same_layout_reports_both_versions(tmp_path: Path, monkeypatch):
+    """The normal path must still report the versions for doctor and the CLI.
+
+    Pinned away from 0 on both sides so a hard-coded field cannot pass.
+    """
+    from agent_knowledge.runtime.refresh import run_refresh
+
+    monkeypatch.setattr(migrations, "LAYOUT_VERSION", 2)
+
+    repo = _vault(tmp_path, layout="2")
     result = run_refresh(repo, dry_run=False)
 
-    assert result["layout_version"] == migrations.LAYOUT_VERSION
-    assert result["project_layout_version"] == migrations.LAYOUT_VERSION
+    assert result["layout_version"] == 2
+    assert result["project_layout_version"] == 2
     assert result["action"] != "blocked"

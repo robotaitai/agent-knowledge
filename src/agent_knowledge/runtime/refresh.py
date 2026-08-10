@@ -809,8 +809,11 @@ def run_refresh(
     except Exception as exc:
         # The chain stopped and left the version unstamped, so it replays next
         # session. Templates do not depend on the layout, so the refresh goes on.
-        warnings.append(f"Layout migration failed: {exc}")
-        changes.append({"target": "layout migration", "action": "failed", "detail": str(exc)})
+        # The type is kept because a broken session is this failure's only surface,
+        # and `str(exc)` alone renders KeyError("Memory") as 'Memory'.
+        detail = f"{type(exc).__name__}: {exc}"
+        warnings.append(f"Layout migration failed: {detail}")
+        changes.append({"target": "layout migration", "action": "failed", "detail": detail})
     else:
         for applied in run.applied:
             changes.append({
@@ -818,7 +821,7 @@ def run_refresh(
                 "action": "dry-run" if dry_run else "updated",
                 "detail": f"{applied.version}: {applied.name}",
             })
-        if run.applied and not run.stamped and not dry_run:
+        if not run.stamped:
             warnings.append(
                 "Could not record layout_version in bedrock/STATUS.md; "
                 "these migrations will replay next session."
@@ -888,7 +891,11 @@ def run_refresh(
 
     # Determine overall action
     active_actions = {c["action"] for c in changes}
-    if dry_run:
+    if "failed" in active_actions:
+        # Ahead of the dry-run branch: a failure is the headline either way, and
+        # "refreshed" would claim success for a run where something broke.
+        action = "degraded"
+    elif dry_run:
         action = "dry-run"
     elif active_actions <= {"up-to-date", "skip", "warn"}:
         action = "up-to-date"
@@ -900,7 +907,10 @@ def run_refresh(
         "framework_version": version,
         "prior_version": prior_version,
         "layout_version": _migrations.LAYOUT_VERSION,
-        "project_layout_version": max(project_layout, _migrations.LAYOUT_VERSION),
+        # Re-read rather than assume the target: under --dry-run, or after the
+        # migration chain raised, the stamp never landed and reporting the target
+        # would tell doctor a project is migrated when it is not.
+        "project_layout_version": _migrations.read_layout_version(repo_root),
         "dry_run": dry_run,
         "integrations_detected": [k for k, v in detected.items() if v],
         "changes": changes,

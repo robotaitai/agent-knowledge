@@ -33,6 +33,12 @@ from typing import Callable, NamedTuple, Sequence
 from agent_knowledge.runtime.frontmatter import fm_get, fm_set
 
 # Bump only when the on-disk layout changes, and add a Migration for it.
+#
+# Before the first bump, check that the release carrying this module is widely
+# deployed. The downgrade guard in refresh.py only protects from that release
+# forward: an install at 0.4.17 or earlier has no layout version to compare and
+# will happily revert a newer project's layout from its SessionStart hook. Bump
+# too early and the guard protects nobody on the teams that most need it.
 LAYOUT_VERSION = 0
 
 
