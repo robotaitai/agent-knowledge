@@ -123,3 +123,88 @@ def test_stamp_reports_failure_when_status_is_unreadable(tmp_path: Path):
     repo = tmp_path / "repo"
     (repo / "bedrock" / "STATUS.md").mkdir(parents=True)
     assert migrations.stamp_layout_version(repo, 1, dry_run=False) is False
+
+
+# --------------------------------------------------------------------------- #
+# Running                                                                      #
+# --------------------------------------------------------------------------- #
+
+
+def test_pending_returns_only_migrations_above_the_recorded_version(tmp_path: Path):
+    """A project at layout 1 must not re-run migration 1."""
+    calls = []
+    registry = (
+        migrations.Migration(1, "first", lambda repo, dry_run: calls.append(1)),
+        migrations.Migration(2, "second", lambda repo, dry_run: calls.append(2)),
+        migrations.Migration(3, "third", lambda repo, dry_run: calls.append(3)),
+    )
+    repo = _vault(tmp_path, layout="1")
+
+    applied = migrations.run_migrations(repo, dry_run=False, registry=registry, target=3)
+
+    assert calls == [2, 3], "only migrations above the recorded version may run"
+    assert [m.name for m in applied] == ["second", "third"]
+
+
+def test_migrations_run_in_ascending_order(tmp_path: Path):
+    """Order is the whole contract: migration 3 may depend on 2 having run."""
+    calls = []
+    registry = (
+        migrations.Migration(3, "third", lambda repo, dry_run: calls.append(3)),
+        migrations.Migration(1, "first", lambda repo, dry_run: calls.append(1)),
+        migrations.Migration(2, "second", lambda repo, dry_run: calls.append(2)),
+    )
+
+    migrations.run_migrations(_vault(tmp_path), dry_run=False, registry=registry, target=3)
+
+    assert calls == [1, 2, 3]
+
+
+def test_runner_stamps_the_target_version(tmp_path: Path):
+    """After migrating, the project must not migrate again on the next session."""
+    registry = (migrations.Migration(1, "first", lambda repo, dry_run: None),)
+    repo = _vault(tmp_path)
+
+    migrations.run_migrations(repo, dry_run=False, registry=registry, target=1)
+
+    assert migrations.read_layout_version(repo) == 1
+
+
+def test_dry_run_neither_applies_nor_stamps(tmp_path: Path):
+    """--dry-run must report the plan without touching the vault."""
+    calls = []
+    registry = (migrations.Migration(1, "first", lambda repo, dry_run: calls.append(dry_run)),)
+    repo = _vault(tmp_path)
+
+    applied = migrations.run_migrations(repo, dry_run=True, registry=registry, target=1)
+
+    assert [m.name for m in applied] == ["first"], "the plan must still be reported"
+    assert calls == [True], "the migration must be told it is a dry run"
+    assert migrations.read_layout_version(repo) == 0, "dry-run must not stamp"
+
+
+def test_up_to_date_project_runs_nothing(tmp_path: Path):
+    """The common case: no work, no write."""
+    calls = []
+    registry = (migrations.Migration(1, "first", lambda repo, dry_run: calls.append(1)),)
+    repo = _vault(tmp_path, layout="1")
+
+    assert migrations.run_migrations(repo, dry_run=False, registry=registry, target=1) == []
+    assert calls == []
+
+
+def test_unstampable_vault_still_migrates_without_raising(tmp_path: Path):
+    """A vault with no frontmatter cannot record the stamp, and replays next session.
+
+    Idempotence is what makes that safe, so the runner reports the work it did
+    rather than raising out of the SessionStart hook.
+    """
+    calls = []
+    registry = (migrations.Migration(1, "first", lambda repo, dry_run: calls.append(1)),)
+    repo = _vault(tmp_path, frontmatter=False)
+
+    applied = migrations.run_migrations(repo, dry_run=False, registry=registry, target=1)
+
+    assert [m.name for m in applied] == ["first"]
+    assert calls == [1]
+    assert migrations.read_layout_version(repo) == 0

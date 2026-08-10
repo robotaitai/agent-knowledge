@@ -8,11 +8,25 @@ an explicit act that says "an existing project needs work done to it".
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Callable, NamedTuple, Sequence
 
 from agent_knowledge.runtime.frontmatter import fm_get, fm_set
 
 # Bump only when the on-disk layout changes, and add a Migration for it.
 LAYOUT_VERSION = 1
+
+
+class Migration(NamedTuple):
+    """One irreversible step from layout `version - 1` to `version`.
+
+    `apply` must be idempotent: it runs from the SessionStart hook, and a crash
+    partway through a chain leaves the stamp unwritten, so the whole chain
+    re-runs on the next session.
+    """
+
+    version: int
+    name: str
+    apply: Callable[[Path, bool], None]
 
 
 def _status_path(repo_root: Path) -> Path:
@@ -69,3 +83,40 @@ def stamp_layout_version(repo_root: Path, version: int, *, dry_run: bool) -> boo
         return True
     _status_path(repo_root).write_text(updated, encoding="utf-8")
     return True
+
+
+def run_migrations(
+    repo_root: Path,
+    *,
+    dry_run: bool,
+    registry: Sequence[Migration] | None = None,
+    target: int | None = None,
+) -> list[Migration]:
+    """Apply every migration above the project's recorded version, in order.
+
+    Returns the migrations that were applied (or, under dry_run, would be).
+    `registry` and `target` are injectable so the ordering contract can be
+    tested without inventing real layout versions.
+    """
+    registry = MIGRATIONS if registry is None else registry
+    target = LAYOUT_VERSION if target is None else target
+
+    current = read_layout_version(repo_root)
+    pending = sorted(
+        (m for m in registry if current < m.version <= target),
+        key=lambda m: m.version,
+    )
+    if not pending:
+        return []
+
+    for migration in pending:
+        migration.apply(repo_root, dry_run)
+
+    # A failed stamp is deliberately not fatal: migrations are idempotent, so an
+    # unstampable vault replays the chain rather than losing work, and raising
+    # here would break the agent session this runs from.
+    stamp_layout_version(repo_root, target, dry_run=dry_run)
+    return pending
+
+
+MIGRATIONS: tuple[Migration, ...] = ()
