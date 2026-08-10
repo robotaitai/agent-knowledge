@@ -1,7 +1,7 @@
 ---
 note_type: durable-branch
 area: conventions
-updated: 2026-04-28
+updated: 2026-05-06
 tags:
   - agent-knowledge
   - memory
@@ -46,6 +46,7 @@ Coding patterns, naming, and design rules.
 
 - 2026-04-28: Added `update_when` convention for all `durable-branch` notes; `doctor` uses it to detect stale notes.
 - 2026-04-28: Documented that each area in `refresh._NOTE_AREA_PATHS` must have a matching durable-branch entry.
+- 2026-05-06: Emoji convention added — use emojis in Memory note section headers for scannability. No emojis in code, logs, or CLI output.
 
 ## 🔗 See Also
 

@@ -1,43 +1,43 @@
 ---
 note_type: evidence
 source: git-log
-extracted: 2026-05-17T07:21:45Z
+extracted: 2026-08-10T23:22:00Z
 commits: 30
 ---
 
 # Recent Git History
 
-Last 30 commits as of 2026-05-17.
+Last 30 commits as of 2026-08-11.
 
 ```
+36ae351 fix: preserve STATUS.md keys on CRLF files and pin LF on write
+a40e7b2 docs: explain layout versions and the no-downgrade rule
+18692a9 fix: preserve unknown STATUS.md frontmatter keys when rewriting
+dc0c0f0 feat: report blocked and degraded refreshes without failing the session
+f0f854d fix: prove the blocked refresh writes nothing and report the on-disk layout
+2190270 feat: run layout migrations from refresh-system and refuse to downgrade
+39b94f3 revert: real_path healing is an invariant, not a layout migration
+ff677ea refactor: move real_path localization into layout migration 1
+0393be7 fix: stamp independently of pending work and report stamp failures
+0f726c3 feat: add an ordered idempotent migration runner
+e674e0e fix: scope layout version reads to frontmatter and report stamp failures
+8f885bd feat: record an on-disk layout version separate from the package version
+076a0c7 docs: record the no-path-in-hooks and single-browser-opener decisions
+2540c99 test: make the --serve check proxy-independent and report the server's output
+643d302 fix: spawn the browser launcher instead of waiting on it; honor $BROWSER
+8c79a9c fix: drop the project path from generated hooks; repair update for local vaults
+3dce430 fix: guard the star prompt behind the display check; gitignore the per-machine sync artifact
+77b621e chore: regenerate local integration files from the updated templates
+38750db fix: portable generated configs, non-destructive refresh, per-area memory; bump v0.4.17
+0b8de26 fix: repair `bedrock view` navigation; harden update path against legacy installs; bump v0.4.16
+5e43bf7 feat: add install.sh caveman installer (uv -> pipx -> pip); document in README
+0a14bb0 feat: sync warns agent on framework version mismatch at session start; bump v0.4.15
+6406812 fix: refresh-system now updates CLAUDE.md on old/legacy headers and regenerates site; bump v0.4.14
+c9aaa14 feat: fix bedrock view browser open; eclectic site redesign with TOC, emojis, anchor links, richer color scheme; bump v0.4.13
+5252319 Update beads release issue state
+47919b3 Release v0.4.12
+d5dbae8 Remove legacy tracked bedrock outputs
+ddcba9b Clean active bedrock vault
 ca5e354 Simplify Bedrock cockpit structure
 e1cc79c bd init: initialize beads issue tracking
-e9a3b83 fix: add encoding=utf-8 to all remaining read_text calls (v0.4.11)
-0da9164 fix: f-string bracket syntax for Python 3.9 compat (test_cli.py:1539)
-78c0592 memory: update packaging, conventions, testing, decisions for v0.4.8–v0.4.10 session
-4b6556e fix: update test path agent-knowledge → bedrock; bump v0.4.10
-2b9fde9 feat: emoji on every decision entry + clean up starter templates
-c32f3b9 feat: emoji section headers in memory branch notes (v0.4.9)
-e3ebc01 fix: add decisions step to every memory-update template (v0.4.8)
-802d16e memory: add decisions 011-014 (bedrock rename, mermaid, gemini/antigravity, install-global)
-b15c19d memory: update packaging, integrations, cli, gotchas for v0.4.3–v0.4.7
-0207efa feat: add Gemini CLI + Antigravity support; bump v0.4.7
-25fd501 feat: add install-global command; bump v0.4.6
-cb34708 fix: revert environment from publish workflow (PyPI trusted publisher has no env)
-87ada28 fix: add environment: pypi to publish job for trusted publisher OIDC
-2444c61 fix: expand .codex/AGENTS.md to be fully self-contained; bump v0.4.5
-2359525 fix: add encoding="utf-8" to all file read/write calls; bump v0.4.4
-8282256 fix: wikilink JS regex + README install flow; bump v0.4.3
-47e3c8a fix: Mermaid diagrams now render in SPA via retry-on-load pattern
-a509a8a feat: Mermaid diagram support in site.py + diagrams in memory notes
-59d36e6 fix: unhide migrate-vault/migrate-from-legacy; add migration hint to CLAUDE.md template; bump v0.4.2
-3416010 docs: rework README for Windows support, v0.4.0 vault rename, Codex as first-class
-06600a4 docs: upgrade Windows to full support in compatibility matrix (v0.4.0 fixes)
-18ab77f docs: add platform x tool support matrix with badges to README
-ec0dc46 chore: memory update -- v0.4.1, completion/upgrade/compact-context, CI fixes
-b01261f fix: update tests for v0.4.0 rename (agent-knowledge -> bedrock, local mode default)
-0b19475 chore: bump version to v0.4.1
-fddebe9 feat: add bedrock upgrade command (checks PyPI, detects pipx vs pip)
-2c92a4a feat: add tab completion command; hide specialist commands from help
-932d445 feat: add /compact-context slash command for Claude, Cursor; fix .claude/CLAUDE.md paths
 ```

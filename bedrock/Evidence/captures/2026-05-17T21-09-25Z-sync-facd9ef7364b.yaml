@@ -1,0 +1,15 @@
+---
+note_type: capture
+timestamp: 2026-05-17T21:09:25Z
+source_tool: cli
+event_type: sync
+project_slug: agent-knowledge
+confidence: cli-confirmed
+---
+
+summary: Project sync: memory branches updated, git evidence extracted, history updated.
+touched_branches:
+  - conventions.md
+  - decisions/decisions.md
+  - packaging.md
+  - testing.md

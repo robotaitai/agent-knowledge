@@ -1,0 +1,197 @@
+{
+  "generated": "2026-05-17T21:09:25Z",
+  "vault": "/Users/taio/code/agent-knowledge/bedrock",
+  "note_count": 19,
+  "notes": [
+    {
+      "path": "Memory/MEMORY.md",
+      "title": "Memory",
+      "note_type": "unknown",
+      "area": "agent-knowledge",
+      "canonical": true,
+      "folder": "Memory",
+      "is_branch_entry": true,
+      "summary": "- [PROJECT](PROJECT.md) -- what Bedrock is, the current product direction, and how to navigate the active cockpit - [decisions](decisions.md) -- active flat decision log; older numbered decisions rema..."
+    },
+    {
+      "path": "Memory/PROJECT.md",
+      "title": "Project",
+      "note_type": "unknown",
+      "area": "agent-knowledge",
+      "canonical": true,
+      "folder": "Memory",
+      "is_branch_entry": false,
+      "summary": "Project Bedrock is a CLI and markdown workflow that turns a repository into a small project cockpit for AI agents. It keeps durable project context in Memory/, current priorities in Work/, and generat..."
+    },
+    {
+      "path": "Memory/architecture.md",
+      "title": "\ud83c\udfd7\ufe0f Architecture",
+      "note_type": "durable-branch",
+      "area": "architecture",
+      "canonical": true,
+      "folder": "Memory",
+      "is_branch_entry": false,
+      "summary": "Core design: path resolution, runtime modules, project config, integrations, knowledge vault model. Two storage modes controlled by vault_mode in .agent-project.yaml: flowchart LR subgraph local[\"loca..."
+    },
+    {
+      "path": "Memory/cli.md",
+      "title": "\ud83d\udee0\ufe0f CLI",
+      "note_type": "durable-branch",
+      "area": "cli",
+      "canonical": true,
+      "folder": "Memory",
+      "is_branch_entry": false,
+      "summary": "Design and implementation of the bedrock command-line interface. Built on click >= 8.0 with a @click.group() top-level. - Infers slug from directory name, detects integrations automatically - Default ..."
+    },
+    {
+      "path": "Memory/conventions.md",
+      "title": "\ud83d\udcd0 Conventions",
+      "note_type": "durable-branch",
+      "area": "conventions",
+      "canonical": true,
+      "folder": "Memory",
+      "is_branch_entry": false,
+      "summary": "Coding patterns, naming, and design rules. - CLI command names use hyphens: bedrock graphify-sync - Python package uses underscores: agent_knowledge - User-facing messages reference CLI commands, neve..."
+    },
+    {
+      "path": "Memory/decisions/decisions.md",
+      "title": "\ud83d\udccb Decision Log",
+      "note_type": "decisions-index",
+      "area": "",
+      "canonical": true,
+      "folder": "Memory",
+      "is_branch_entry": false,
+      "summary": "Architectural and process decisions for agent-knowledge. - Date: 2026-04-08 - Context: Needed a modern pyproject.toml-only backend that supports force-include for non-Python assets - Decision: hatchli..."
+    },
+    {
+      "path": "Memory/decisions.md",
+      "title": "Decisions",
+      "note_type": "decisions-index",
+      "area": "",
+      "canonical": true,
+      "folder": "Memory",
+      "is_branch_entry": false,
+      "summary": "Use this file for important project decisions. Decision: What was decided. Why: Why this decision was made. Impact: What this changes. Related files: Links to relevant Memory or Work items. Decision: ..."
+    },
+    {
+      "path": "Memory/deployments.md",
+      "title": "\ud83d\ude80 Deployments",
+      "note_type": "durable-branch",
+      "area": "deployments",
+      "canonical": true,
+      "folder": "Memory",
+      "is_branch_entry": false,
+      "summary": "Release, CI, and distribution strategy. 0.3.2 (tagged v0.3.2). See packaging. GitHub Actions (.github/workflows/ci.yml): - Triggered on push/PR to main - Matrix: ubuntu-latest + macos-latest, Python 3..."
+    },
+    {
+      "path": "Memory/glossary.md",
+      "title": "Glossary",
+      "note_type": "unknown",
+      "area": "agent-knowledge",
+      "canonical": true,
+      "folder": "Memory",
+      "is_branch_entry": false,
+      "summary": "Project-specific terms, acronyms, and names. - Bedrock \u2014 the CLI and project-cockpit workflow in this repository. - Memory \u2014 curated, durable project knowledge. - Work \u2014 current focus, open loops, and..."
+    },
+    {
+      "path": "Memory/gotchas.md",
+      "title": "\u26a0\ufe0f Gotchas",
+      "note_type": "durable-branch",
+      "area": "gotchas",
+      "canonical": true,
+      "folder": "Memory",
+      "is_branch_entry": false,
+      "summary": "Known pitfalls, traps, and non-obvious behaviors. - set -euo pipefail + trailing [ \"$DRY_RUN\" -eq 1 ] && log ... causes exit 1 when test is false. Use if/then instead. See conventions. - ship.sh uses ..."
+    },
+    {
+      "path": "Memory/history-layer.md",
+      "title": "\ud83d\udcc5 History Layer",
+      "note_type": "durable-branch",
+      "area": "history-layer",
+      "canonical": true,
+      "folder": "Memory",
+      "is_branch_entry": false,
+      "summary": "Lightweight project diary. Records what happened over time without becoming a second knowledge base. History/ events.ndjson    -- append-only machine-readable event log (NDJSON) history.md       -- hu..."
+    },
+    {
+      "path": "Memory/integrations.md",
+      "title": "\ud83d\udd0c Integrations",
+      "note_type": "durable-branch",
+      "area": "integrations",
+      "canonical": true,
+      "folder": "Memory",
+      "is_branch_entry": false,
+      "summary": "Multi-tool detection and bridge file installation for Cursor, Claude, Codex, Gemini CLI, and Antigravity. Called by init via detect() then install_all(). - .cursor/hooks.json -- 4 hooks: post-write, s..."
+    },
+    {
+      "path": "Memory/packaging.md",
+      "title": "\ud83d\udce6 Packaging",
+      "note_type": "durable-branch",
+      "area": "packaging",
+      "canonical": true,
+      "folder": "Memory",
+      "is_branch_entry": false,
+      "summary": "Python packaging strategy for making bedrock pip-installable. - Backend: hatchling via pyproject.toml - Layout: src-layout at src/agent_knowledge/ - Entry points: bedrock = agent_knowledge.cli:main, a..."
+    },
+    {
+      "path": "Memory/stack.md",
+      "title": "\ud83d\udcda Stack",
+      "note_type": "durable-branch",
+      "area": "stack",
+      "canonical": true,
+      "folder": "Memory",
+      "is_branch_entry": false,
+      "summary": "Languages, runtimes, frameworks, and tooling used by agent-knowledge. - Python 3.9+ -- package code, CLI, tests - Bash -- bundled scripts in assets/scripts/ (see architecture) - hatchling via pyprojec..."
+    },
+    {
+      "path": "Memory/testing.md",
+      "title": "\ud83e\uddea Testing",
+      "note_type": "durable-branch",
+      "area": "testing",
+      "canonical": true,
+      "folder": "Memory",
+      "is_branch_entry": false,
+      "summary": "Test strategy for packaging validation and CLI correctness. - Framework: pytest (dev dependency). - 151 tests across 2 files: tests/test_packaging.py (23) and tests/test_cli.py (~128). - CI: GitHub Ac..."
+    },
+    {
+      "path": "Evidence/imports/click-quickstart.md",
+      "title": "Quickstart \u2014 Click Documentation (8.3.x)",
+      "note_type": "evidence",
+      "area": "",
+      "canonical": false,
+      "folder": "Evidence",
+      "is_branch_entry": false,
+      "summary": "> Imported from: https://click.palletsprojects.com/en/stable/quickstart/ > Date: 2026-04-11 > This is non-canonical evidence. Verify before promoting facts to Memory/. Quickstart \u2014 Click Documentation..."
+    },
+    {
+      "path": "Evidence/imports/imported-evidence.md",
+      "title": "Imported Evidence",
+      "note_type": "evidence-imports",
+      "area": "agent-knowledge",
+      "canonical": false,
+      "folder": "Evidence",
+      "is_branch_entry": false,
+      "summary": "Supporting material from backfill. Not canonical truth. - existing-docs.txt -- project documentation inventory - doc-index.txt -- documentation structure - structural-summary.md -- codebase structure ..."
+    },
+    {
+      "path": "Evidence/imports/obsidian-api-readme.md",
+      "title": "Obsidian API",
+      "note_type": "evidence",
+      "area": "",
+      "canonical": false,
+      "folder": "Evidence",
+      "is_branch_entry": false,
+      "summary": "> Imported from: https://raw.githubusercontent.com/obsidianmd/obsidian-api/master/README.md > Date: 2026-04-11 > This is non-canonical evidence. Verify before promoting facts to Memory/. Type definiti..."
+    },
+    {
+      "path": "Evidence/raw/git-recent.md",
+      "title": "Recent Git History",
+      "note_type": "evidence",
+      "area": "",
+      "canonical": false,
+      "folder": "Evidence",
+      "is_branch_entry": false,
+      "summary": "Last 30 commits as of 2026-05-18. d5dbae8 Remove legacy tracked bedrock outputs ddcba9b Clean active bedrock vault ca5e354 Simplify Bedrock cockpit structure e1cc79c bd init: initialize beads issue tr..."
+    }
+  ]
+}
