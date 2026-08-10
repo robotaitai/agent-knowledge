@@ -2580,3 +2580,59 @@ def test_doctor_warns_when_the_project_layout_is_newer(tmp_path: Path):
     r = _run("doctor", "--project", str(repo))
 
     assert "pip install -U project-bedrock" in r.stderr
+
+
+def _status_frontmatter(repo: Path) -> dict[str, str]:
+    """Parse bedrock/STATUS.md's leading frontmatter block into key -> value."""
+    text = (repo / "bedrock" / "STATUS.md").read_text(encoding="utf-8")
+    assert text.startswith("---\n")
+    block = text[4:].split("\n---", 1)[0]
+    fields: dict[str, str] = {}
+    for line in block.splitlines():
+        if ":" in line:
+            key, _, value = line.partition(":")
+            fields[key.strip()] = value.strip()
+    return fields
+
+
+def test_status_frontmatter_survives_doctor(tmp_path: Path):
+    """The shell rewrite of STATUS.md must not drop keys the Python layer owns.
+
+    kc_status_write rebuilds the frontmatter from a fixed field list, so every
+    key written elsewhere (framework_version, last_system_refresh,
+    layout_version) used to be erased on each doctor/sync/validate run.
+    """
+    repo = _init_repo(tmp_path, "status-frontmatter")
+    kh = tmp_path / "kh"
+    _run("init", "--repo", str(repo), "--knowledge-home", str(kh))
+    _run("refresh-system", "--project", str(repo))
+
+    before = _status_frontmatter(repo)
+    assert "framework_version" in before, "refresh-system should stamp framework_version"
+
+    status = repo / "bedrock" / "STATUS.md"
+    text = status.read_text(encoding="utf-8")
+    end = text.find("\n---", 3)
+    custom = "spaced: value/with, colon"
+    status.write_text(
+        f"{text[:end]}\nlayout_version: 7\ncustom_key: {custom}{text[end:]}",
+        encoding="utf-8",
+    )
+
+    r = _run("doctor", "--project", str(repo))
+    assert r.returncode == 0, r.stderr
+
+    after = _status_frontmatter(repo)
+    assert after.get("layout_version") == "7"
+    assert after.get("custom_key") == custom
+    assert after.get("framework_version") == before["framework_version"]
+    assert after.get("last_system_refresh") == before.get("last_system_refresh")
+
+    # Preserved keys must not drift or duplicate on a second rewrite.
+    _run("doctor", "--project", str(repo))
+    again = _status_frontmatter(repo)
+    preserved = ("layout_version", "custom_key", "framework_version", "last_system_refresh")
+    assert {k: again.get(k) for k in preserved} == {k: after.get(k) for k in preserved}
+    block = status.read_text(encoding="utf-8")[4:].split("\n---", 1)[0]
+    assert block.count("custom_key:") == 1
+    assert block.count("framework_version:") == 1

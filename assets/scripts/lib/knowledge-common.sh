@@ -825,11 +825,44 @@ kc_status_load() {
     )"
 }
 
+# The Python layer stamps keys of its own into this frontmatter
+# (framework_version, last_system_refresh, layout_version). kc_status_write
+# rebuilds the block from a fixed field list, so anything it does not know about
+# has to be carried through verbatim or the two layers erase each other's work.
+kc_status_extra_frontmatter() {
+    [ -f "$STATUS_FILE" ] || return 0
+
+    awk '
+        BEGIN {
+            managed_keys = "note_type project profile profile_hint ontology_model real_knowledge_path"
+            managed_keys = managed_keys " local_pointer_path onboarding last_bootstrap last_backfill_import"
+            managed_keys = managed_keys " last_project_sync last_compaction last_validation"
+            managed_keys = managed_keys " last_validation_result last_doctor last_doctor_result"
+            split(managed_keys, managed, " ")
+            for (i in managed) known[managed[i]] = 1
+            keep = 0
+        }
+        NR == 1 { if ($0 != "---") exit; next }
+        $0 == "---" { exit }
+        {
+            if (match($0, /^[A-Za-z_][A-Za-z0-9_.-]*:/)) {
+                key = substr($0, 1, RLENGTH - 1)
+                keep = (!(key in known) && !(key in seen))
+                seen[key] = 1
+            }
+            # Non-key lines belong to whichever key preceded them.
+            if (keep) print $0
+        }
+    ' "$STATUS_FILE"
+}
+
 kc_status_write() {
     local tmp_file
     local warnings_text="${1:-$STATUS_WARNING_LINES}"
     local warning=""
+    local extra_frontmatter
 
+    extra_frontmatter="$(kc_status_extra_frontmatter)"
     tmp_file="$(mktemp)"
     {
         printf '%s\n' '---'
@@ -848,6 +881,9 @@ kc_status_write() {
         printf 'last_validation_result: %s\n' "$STATUS_LAST_VALIDATION_RESULT"
         printf 'last_doctor: %s\n' "$STATUS_LAST_DOCTOR"
         printf 'last_doctor_result: %s\n' "$STATUS_LAST_DOCTOR_RESULT"
+        if [ -n "$extra_frontmatter" ]; then
+            printf '%s\n' "$extra_frontmatter"
+        fi
         printf '%s\n\n' '---'
         printf '# Knowledge Status: %s\n\n' "$STATUS_PROJECT"
         printf '## Current State\n\n'
