@@ -86,19 +86,33 @@ def open_in_browser(target: str) -> bool:
     """Open a file path or URL in the system browser.
 
     Returns False when there is no display, so the caller can print the target
-    instead. The launcher's own stderr is discarded: it arrives after the shell
-    prompt has returned and would otherwise scribble over the next prompt.
+    instead.
+
+    The launcher is spawned and never waited on: on a machine without a GUI
+    session `open` can block for a long time, which would stall a caller that
+    has more to do -- `bedrock view --serve` still has a port to bind. Its
+    output is discarded too, since it arrives after the shell prompt has
+    returned and would otherwise scribble over the next prompt.
     """
     if not has_display():
         return False
 
-    try:
-        if sys.platform == "darwin":
-            subprocess.run(["open", target], check=False, stderr=subprocess.DEVNULL)
-        elif sys.platform == "win32":
+    browser = os.environ.get("BROWSER")
+    if browser:
+        argv = [browser, target]
+    elif sys.platform == "darwin":
+        argv = ["open", target]
+    elif sys.platform == "win32":
+        try:
             os.startfile(target)  # noqa: S606 -- Windows' own shell-open verb
-        else:
-            subprocess.run(["xdg-open", target], check=False, stderr=subprocess.DEVNULL)
+        except OSError:
+            return False
+        return True
+    else:
+        argv = ["xdg-open", target]
+
+    try:
+        subprocess.Popen(argv, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     except OSError:
         return False
     return True

@@ -1020,6 +1020,11 @@ def test_clean_import_local_html(tmp_path: Path):
     kh = tmp_path / "kh"
     _run("init", "--repo", str(repo), "--knowledge-home", str(kh))
 
+    # init writes its own evidence here, so identify the imported note by what
+    # this command adds rather than by picking the first non-README file.
+    imports_dir = repo / "bedrock" / "Evidence" / "imports"
+    before = {f.name for f in imports_dir.glob("*.md")}
+
     r = _run(
         "clean-import",
         str(html_file),
@@ -1027,12 +1032,10 @@ def test_clean_import_local_html(tmp_path: Path):
     )
     assert r.returncode == 0, f"clean-import failed: {r.stderr}"
 
-    imports_dir = repo / "bedrock" / "Evidence" / "imports"
-    # Exclude README.md created by bootstrap
-    md_files = [f for f in imports_dir.glob("*.md") if f.name != "README.md"]
-    assert len(md_files) >= 1, "clean-import should produce a .md file (besides README.md)"
+    added = [f for f in imports_dir.glob("*.md") if f.name not in before]
+    assert len(added) == 1, f"clean-import should produce exactly one .md file, got {added}"
 
-    content = md_files[0].read_text()
+    content = added[0].read_text()
     assert "note_type: evidence" in content
     assert "canonical: false" in content
     assert "Main Content" in content or "useful text" in content.lower()
@@ -2012,6 +2015,39 @@ def test_view_no_open_flag(tmp_path: Path):
     assert (repo / "bedrock" / "Views" / "site" / "index.html").is_file()
 
 
+def test_open_in_browser_does_not_wait_for_the_launcher(monkeypatch):
+    """The launcher must be spawned, not waited on.
+
+    On a GUI-less macOS box `open` can block for a long time. Waiting for it
+    stalls `bedrock view --serve` before it ever binds its port.
+    """
+    from agent_knowledge.runtime import shell
+
+    monkeypatch.setattr(shell, "has_display", lambda: True)
+    monkeypatch.setattr(
+        shell.subprocess, "run",
+        lambda *a, **k: pytest.fail("the browser launcher must not be waited on"),
+    )
+    spawned = []
+    monkeypatch.setattr(shell.subprocess, "Popen", lambda *a, **k: spawned.append((a, k)))
+
+    assert shell.open_in_browser("http://127.0.0.1:1/index.html")
+    assert spawned, "launcher must still be spawned when a display exists"
+
+
+def test_open_in_browser_honors_the_browser_env_var(monkeypatch):
+    """$BROWSER must win over the platform launcher, as every other tool honors it."""
+    from agent_knowledge.runtime import shell
+
+    monkeypatch.setattr(shell, "has_display", lambda: True)
+    monkeypatch.setenv("BROWSER", "my-browser")
+    spawned = []
+    monkeypatch.setattr(shell.subprocess, "Popen", lambda *a, **k: spawned.append((a, k)))
+
+    assert shell.open_in_browser("http://127.0.0.1:1/index.html")
+    assert spawned[0][0][0] == ["my-browser", "http://127.0.0.1:1/index.html"]
+
+
 def test_star_prompt_does_not_launch_a_browser_without_a_display(monkeypatch, tmp_path: Path):
     """The one-time star prompt must not spawn a GUI browser on a headless/SSH box.
 
@@ -2049,7 +2085,7 @@ def test_star_prompt_opens_the_repo_when_a_display_exists(monkeypatch, tmp_path:
 
     launched: list[tuple] = []
     monkeypatch.setattr(shell, "has_display", lambda: True)
-    monkeypatch.setattr(shell.subprocess, "run", lambda *a, **k: launched.append(a))
+    monkeypatch.setattr(shell.subprocess, "Popen", lambda *a, **k: launched.append(a))
     monkeypatch.setattr(shell.os, "startfile", lambda target: launched.append((target,)), raising=False)
     monkeypatch.setattr(cli, "_STAR_MARKER", tmp_path / "starred")
     monkeypatch.setattr(cli.click, "confirm", lambda *a, **k: True)
