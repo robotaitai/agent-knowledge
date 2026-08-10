@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bedrock sync --project \"${CLAUDE_PROJECT_DIR:-.}\" && bedrock refresh-system --project \"${CLAUDE_PROJECT_DIR:-.}\""
+            "command": "bedrock sync && bedrock refresh-system"
           }
         ]
       }
@@ -17,7 +17,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bedrock sync --project \"${CLAUDE_PROJECT_DIR:-.}\""
+            "command": "bedrock sync"
           }
         ]
       }
@@ -28,7 +28,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bedrock sync --project \"${CLAUDE_PROJECT_DIR:-.}\""
+            "command": "bedrock sync"
           }
         ]
       }

@@ -689,7 +689,10 @@ kc_require_knowledge_pointer() {
     pointer_resolved="$(kc_pointer_resolved_path || true)"
     [ -n "$pointer_resolved" ] || kc_fail "Unable to resolve local knowledge pointer: $KNOWLEDGE_POINTER_PATH"
     [ "$pointer_resolved" = "$KNOWLEDGE_REAL_DIR" ] || kc_fail "Local knowledge pointer must resolve to the external knowledge folder: $KNOWLEDGE_REAL_DIR"
-    if [ ! -L "$KNOWLEDGE_POINTER_PATH" ] && ! kc_is_windows_like; then
+    # Only an external vault is reached through a symlink. In local mode -- the
+    # default -- ./bedrock is a real directory in the repo, so requiring a
+    # symlink there fails every command that validates the pointer.
+    if [ "${VAULT_MODE:-external}" != "local" ] && [ ! -L "$KNOWLEDGE_POINTER_PATH" ] && ! kc_is_windows_like; then
         kc_fail "Local knowledge handle must be a symlink to the external knowledge folder, not a repo-local directory: $KNOWLEDGE_POINTER_PATH"
     fi
 }

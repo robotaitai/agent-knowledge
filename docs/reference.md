@@ -96,13 +96,19 @@ Versions before 0.4.17 wrote the setting-up machine's absolute repo path into
 Error: Invalid value for '--project': Path '/home/someone/code/proj' does not exist.
 ```
 
-0.4.17 generates relative paths and repairs the old ones, but the repair ships
-via `refresh-system` -- which normally runs from the `SessionStart` hook, the
-very hook that is broken. So run it by hand once per repo, then commit:
+0.4.17 generates hook commands with no path at all -- `bedrock sync` rather than
+`bedrock sync --project <dir>` -- and the CLI walks up from wherever it was
+invoked to find the project root. Nothing to hardcode, nothing to quote when the
+path contains a space, and nothing that depends on the shell expanding a
+variable (Windows hooks run under Git Bash or PowerShell, which disagree).
+
+The repair ships via `refresh-system`, which normally runs from the
+`SessionStart` hook -- the very hook that is broken. So run it by hand once per
+repo, then commit:
 
 ```bash
 bedrock refresh-system --project .
-git commit -am "fix: relative paths in bedrock integration files"
+git commit -am "fix: portable bedrock integration files"
 ```
 
 Project-added hooks, `permissions`, and `env` in `.claude/settings.json` are
@@ -128,7 +134,7 @@ Common issues:
 - Onboarding still pending: paste the init prompt into your agent
 - Claude not picking up memory: check `.claude/settings.json` exists -- run `bedrock refresh-system`
 - Cursor hooks not firing: check `.cursor/hooks.json` exists -- run `bedrock refresh-system`
-- `Invalid value for '--project': Path ... does not exist` in a hook: the repo was set up before 0.4.17 on another machine -- run `bedrock refresh-system --project .` once and commit the result (see "Keeping up to date")
+- `Invalid value for '--project': Path ... does not exist` in a hook, or a path that stops at the first space: the repo was set up before 0.4.17, when hook commands still carried a path -- run `bedrock refresh-system --project .` once and commit the result (see "Keeping up to date")
 - `bedrock view` opens nothing over SSH: the browser is skipped without a display and the path is printed instead; use `bedrock view --serve` and forward the port
 - Stale index: run `bedrock sync`
 - Large notes: run `bedrock compact`

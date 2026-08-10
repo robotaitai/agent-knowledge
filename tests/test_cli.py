@@ -1065,13 +1065,16 @@ def test_clean_import_dry_run(tmp_path: Path):
     kh = tmp_path / "kh"
     _run("init", "--repo", str(repo), "--knowledge-home", str(kh))
 
+    # Compare against what init already imported rather than assuming the
+    # directory is empty -- init writes its own evidence there.
+    imports_dir = repo / "bedrock" / "Evidence" / "imports"
+    before = {f.name for f in imports_dir.glob("*.md")}
+
     r = _run("clean-import", str(html_file), "--project", str(repo), "--dry-run")
     assert r.returncode == 0
 
-    imports_dir = repo / "bedrock" / "Evidence" / "imports"
-    # dry-run must not create any imported files (README.md from bootstrap is ok)
-    non_readme = [f for f in imports_dir.glob("*.md") if f.name != "README.md"]
-    assert not non_readme, "dry-run must not create any import files"
+    after = {f.name for f in imports_dir.glob("*.md")}
+    assert after == before, f"dry-run must not create any import files: {after - before}"
 
 
 def test_clean_import_json_mode(tmp_path: Path):
@@ -1749,8 +1752,14 @@ def test_claude_settings_hooks_reference_installed_cli(tmp_path: Path):
     assert "bash " not in content
 
 
-def test_claude_settings_hooks_use_relative_project(tmp_path: Path):
-    """Hook commands must target --project . so the tracked config stays portable."""
+def test_claude_settings_hooks_pass_no_path_at_all(tmp_path: Path):
+    """Hook commands must carry no path argument.
+
+    A path in the command has to be correct on every machine, survive spaces,
+    and expand in whatever shell the agent picked -- Git Bash or PowerShell on
+    Windows. Passing none and letting the CLI find the project root sidesteps
+    all three.
+    """
     repo = _init_repo(tmp_path, "claude repo path")  # space: must not need quoting
     kh = tmp_path / "kh"
     _run("init", "--repo", str(repo), "--knowledge-home", str(kh))
@@ -1761,14 +1770,13 @@ def test_claude_settings_hooks_use_relative_project(tmp_path: Path):
         for entry in hook_list:
             for hook in entry.get("hooks", []):
                 cmd = hook.get("command", "")
-                # $CLAUDE_PROJECT_DIR keeps the hook correct when the session
-                # starts in a subdirectory; "." is the portable fallback.
-                assert '--project "${CLAUDE_PROJECT_DIR:-.}"' in cmd, f"Hook for {event} must target the project dir"
+                assert "--project" not in cmd, f"Hook for {event} must not pass a project path"
+                assert "$" not in cmd, f"Hook for {event} must not depend on shell variable expansion"
                 assert repo_abs not in cmd, f"Hook for {event} must not hardcode the repo path"
 
 
-def test_cursor_hooks_use_relative_project(tmp_path: Path):
-    """Cursor hook commands must be free of machine-specific absolute paths."""
+def test_cursor_hooks_pass_no_path_at_all(tmp_path: Path):
+    """Cursor hook commands must carry no path argument either."""
     repo = _init_repo(tmp_path, "cursor repo path")  # space: must not need quoting
     kh = tmp_path / "kh"
     _run("init", "--repo", str(repo), "--knowledge-home", str(kh))
@@ -1777,8 +1785,69 @@ def test_cursor_hooks_use_relative_project(tmp_path: Path):
     repo_abs = str(repo.resolve())
     for hook in data["hooks"]:
         cmd = hook["command"]
-        assert "--project ." in cmd, f"{hook['name']} must use --project ."
+        assert "--project" not in cmd, f"{hook['name']} must not pass a project path"
+        assert "$" not in cmd, f"{hook['name']} must not depend on shell variable expansion"
         assert repo_abs not in cmd, f"{hook['name']} must not hardcode the repo path"
+
+
+def test_sync_run_from_a_subdirectory_finds_the_project(tmp_path: Path):
+    """Hooks run in whatever cwd the agent was in, so a bare command must walk up."""
+    repo = _init_repo(tmp_path, "subdir-sync")
+    kh = tmp_path / "kh"
+    _run("init", "--repo", str(repo), "--knowledge-home", str(kh))
+
+    nested = repo / "src" / "deep"
+    nested.mkdir(parents=True)
+
+    r = _run("sync", cwd=str(nested))
+    assert r.returncode == 0, f"sync from a subdirectory must find the project: {r.stderr}"
+    assert not (nested / "bedrock").exists(), "sync must not scaffold a second vault beside the agent's cwd"
+    assert "vault not found" not in r.stderr, f"sync silently skipped the vault: {r.stderr}"
+
+
+def test_scaffolded_project_overview_indexes_area_docs(tmp_path: Path):
+    """PROJECT.md must carry an Areas index so per-area docs have a visible home.
+
+    Without a place to list them, cross-cutting subsystems end up scattered
+    between the overview and the decisions log.
+    """
+    repo = _init_repo(tmp_path, "areas-index")
+    kh = tmp_path / "kh"
+    _run("init", "--repo", str(repo), "--knowledge-home", str(kh))
+
+    text = (repo / "bedrock" / "Memory" / "PROJECT.md").read_text()
+    assert "## Areas" in text, "PROJECT.md must have an Areas section"
+    assert "Memory/<area>.md" in text, "the Areas section must name the per-area doc convention"
+
+
+def test_update_works_in_a_local_vault(tmp_path: Path):
+    """A local vault is a real directory, so update must not demand a symlink.
+
+    The Cursor post-write hook runs `bedrock update`, so this fails on every
+    write in every default-mode project.
+    """
+    repo = _init_repo(tmp_path, "local-update")
+    kh = tmp_path / "kh"
+    _run("init", "--repo", str(repo), "--knowledge-home", str(kh))
+
+    r = _run("update", "--project", str(repo))
+    assert "must be a symlink" not in r.stderr, "local vaults are directories, not symlinks"
+    assert r.returncode == 0, f"update must work in a local vault: {r.stderr}"
+
+
+def test_update_summary_file_lands_in_the_project_from_a_subdirectory(tmp_path: Path):
+    """A relative --summary-file must resolve against the project, not the agent's cwd."""
+    repo = _init_repo(tmp_path, "subdir-summary")
+    kh = tmp_path / "kh"
+    _run("init", "--repo", str(repo), "--knowledge-home", str(kh))
+
+    nested = repo / "src" / "deep"
+    nested.mkdir(parents=True)
+
+    r = _run("update", "--summary-file", "./.cursor/knowledge-sync.last.json", cwd=str(nested))
+    assert r.returncode == 0, f"update from a subdirectory failed: {r.stderr}"
+    assert (repo / ".cursor" / "knowledge-sync.last.json").is_file()
+    assert not (nested / ".cursor").exists(), "summary must not land beside the agent's cwd"
 
 
 def test_refresh_system_preserves_foreign_claude_hooks(tmp_path: Path):

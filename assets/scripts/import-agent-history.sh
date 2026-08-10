@@ -30,11 +30,15 @@ DATE="$(kc_today)"
 GENERATED_AT="$(kc_now_utc)"
 
 while [ "$#" -gt 0 ]; do
-    if kc_parse_common_flag "$@" ; then
+    # Capture the status directly: after a failed `if` with no else branch, $?
+    # is the status of the `if` itself (0), not of the condition -- which made
+    # the two-argument return unreachable and silently swallowed --summary-file.
+    flag_status=0
+    kc_parse_common_flag "$@" || flag_status=$?
+    if [ "$flag_status" -eq 0 ]; then
         shift
         continue
     fi
-    flag_status=$?
     if [ "$flag_status" -eq 2 ]; then
         shift 2
         continue
@@ -350,8 +354,18 @@ DOC_INDEX_PATHS="$(find_any_relative \
     -not -path "*/node_modules/*" \
     -not -path "*/.git/*" \
     -not -path "*/vendor/*")"
-TASK_PATHS="$(find "$TARGET_PROJECT/tasks" -mindepth 1 -maxdepth 2 -type f 2>/dev/null | relative_path | kc_filter_relative_lines | sort)"
-SESSION_FILE_PATHS="$(find "$SESSIONS_DIR" -mindepth 1 -maxdepth 1 -type f 2>/dev/null | relative_path | kc_filter_relative_lines | sort)"
+# Guard both finds on the directory existing: under `set -o pipefail` a find
+# over a missing path fails the whole command substitution and aborts the run,
+# which is how `bedrock update` came to exit 1 in any repo without a tasks/ dir.
+TASK_PATHS="$(if [ -d "$TARGET_PROJECT/tasks" ]; then
+    find "$TARGET_PROJECT/tasks" -mindepth 1 -maxdepth 2 -type f 2>/dev/null | relative_path | kc_filter_relative_lines | sort
+fi)"
+# Sessions/ is a legacy vault folder; the shared lib stopped defining a path for
+# it when the cockpit was simplified, so resolve it here for older vaults.
+SESSIONS_DIR="${SESSIONS_DIR:-$KNOWLEDGE_DIR/Sessions}"
+SESSION_FILE_PATHS="$(if [ -d "$SESSIONS_DIR" ]; then
+    find "$SESSIONS_DIR" -mindepth 1 -maxdepth 1 -type f 2>/dev/null | relative_path | kc_filter_relative_lines | sort
+fi)"
 TRACE_PATHS="$(for d in agent-traces traces logs/agent bedrock/Outputs/traces; do
     if [ -d "$TARGET_PROJECT/$d" ] && ! kc_path_is_ignored "$d"; then
         find "$TARGET_PROJECT/$d" -type f 2>/dev/null | relative_path | kc_filter_relative_lines

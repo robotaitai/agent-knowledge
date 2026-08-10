@@ -45,6 +45,24 @@ def main() -> None:
 
 # -- helpers --------------------------------------------------------------- #
 
+def _resolve_project(project: str) -> str:
+    """Resolve --project to the enclosing bedrock project, walking up if needed.
+
+    Hooks run in whatever directory the agent happened to be in, which is not
+    always the repo root. Walking up lets a generated hook command carry no path
+    at all -- nothing to hardcode, nothing to quote, and nothing that depends on
+    the shell expanding a variable (Windows hooks may run under PowerShell).
+
+    A directory that is itself a connected project is returned untouched, so an
+    explicit --project always wins.
+    """
+    start = Path(project).resolve()
+    for candidate in (start, *start.parents):
+        if (candidate / ".agent-project.yaml").is_file():
+            return str(candidate)
+    return str(start)
+
+
 def _patch_gitignore_for_local_knowledge(repo_path: Path, json_mode: bool) -> None:
     """Append local-mode knowledge gitignore patterns if not already present."""
     from agent_knowledge.runtime.gitignore import ensure_patterns
@@ -231,7 +249,7 @@ def sync(project: str, dry_run: bool, json_mode: bool) -> None:
 
     from agent_knowledge.runtime.sync import run_sync
 
-    repo_path = Path(project).resolve()
+    repo_path = Path(_resolve_project(project))
     results = run_sync(repo_path, dry_run=dry_run)
 
     if json_mode:
@@ -310,6 +328,7 @@ def update(
     json_mode: bool,
 ) -> None:
     """Sync project changes into the knowledge tree."""
+    project = _resolve_project(project)
     args = ["--project", project]
     if compact:
         args.append("--compact")
@@ -320,7 +339,8 @@ def update(
     if decision_slug:
         args.extend(["--decision-slug", decision_slug])
     if summary_file:
-        args.extend(["--summary-file", summary_file])
+        # Relative to the project, not to wherever the agent happened to be.
+        args.extend(["--summary-file", str(Path(project) / summary_file)])
     _add_common_flags(args, dry_run=dry_run, json_mode=json_mode)
     sys.exit(run_bash_script("update-knowledge.sh", args))
 
@@ -345,7 +365,7 @@ def doctor(project: str, dry_run: bool, json_mode: bool) -> None:
     from agent_knowledge.runtime.history import history_exists
     from agent_knowledge.runtime.health import check_install_health
 
-    repo_root = Path(project).resolve()
+    repo_root = Path(_resolve_project(project))
 
     # Install health check (legacy/shadowed package copies that block updates)
     install_issues = check_install_health()
@@ -1070,7 +1090,7 @@ def refresh_system(project: str, dry_run: bool, json_mode: bool, force: bool) ->
 
     from agent_knowledge.runtime.refresh import run_refresh
 
-    repo_root = Path(project).resolve()
+    repo_root = Path(_resolve_project(project))
     result = run_refresh(repo_root, dry_run=dry_run, force=force)
 
     if json_mode:

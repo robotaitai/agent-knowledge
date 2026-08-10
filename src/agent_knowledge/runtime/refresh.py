@@ -99,13 +99,17 @@ def _normalize_json(text: str) -> dict | None:
 # command cannot be swallowed, but allows spaces and quotes inside one argument.
 _CLI = r"(?:bedrock|agent-knowledge)"
 _ARG = r"""(?:"[^"]*"|'[^']*'|[^&|;<>]+?)"""
+# --project is optional: current templates omit it entirely and let the CLI walk
+# up to the project root, but every historical form still has to be recognized
+# so an old checkout is repaired rather than left alone.
+_PROJ = rf"(?: --project {_ARG})?"
+_SUMMARY = rf"(?: --summary-file {_ARG})?"
 _GENERATED_HOOK_COMMANDS = tuple(
     re.compile(pattern)
     for pattern in (
-        rf"{_CLI} sync --project {_ARG}",
-        rf"{_CLI} sync --project {_ARG} && {_CLI} refresh-system --project {_ARG}",
-        rf"{_CLI} update --summary-file {_ARG} --project {_ARG}",
-        rf"{_CLI} update --project {_ARG}",
+        rf"{_CLI} sync{_PROJ}",
+        rf"{_CLI} sync{_PROJ} && {_CLI} refresh-system{_PROJ}",
+        rf"{_CLI} update{_SUMMARY}{_PROJ}",
     )
 )
 

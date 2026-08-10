@@ -49,11 +49,15 @@ WARNINGS=()
 CHANGES=()
 
 while [ "$#" -gt 0 ]; do
-    if kc_parse_common_flag "$@" ; then
+    # Capture the status directly: after a failed `if` with no else branch, $?
+    # is the status of the `if` itself (0), not of the condition -- which made
+    # the two-argument return unreachable and silently swallowed --summary-file.
+    flag_status=0
+    kc_parse_common_flag "$@" || flag_status=$?
+    if [ "$flag_status" -eq 0 ]; then
         shift
         continue
     fi
-    flag_status=$?
     if [ "$flag_status" -eq 2 ]; then
         shift 2
         continue
