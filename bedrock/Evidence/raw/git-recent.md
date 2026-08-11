@@ -1,7 +1,7 @@
 ---
 note_type: evidence
 source: git-log
-extracted: 2026-08-10T23:22:00Z
+extracted: 2026-08-11T00:06:52Z
 commits: 30
 ---
 
@@ -10,6 +10,11 @@ commits: 30
 Last 30 commits as of 2026-08-11.
 
 ```
+c98c3f4 chore: export beads issues
+f2bfa9d fix: guard sync against a newer project layout
+e34521c fix: Path.write_text(newline=) requires Python 3.10, project supports 3.9
+2afd94f chore: sync vault after the 0.4.17 work
+0db67ad docs: document team-portable hooks and layout versions in the README
 36ae351 fix: preserve STATUS.md keys on CRLF files and pin LF on write
 a40e7b2 docs: explain layout versions and the no-downgrade rule
 18692a9 fix: preserve unknown STATUS.md frontmatter keys when rewriting
@@ -35,9 +40,4 @@ e674e0e fix: scope layout version reads to frontmatter and report stamp failures
 6406812 fix: refresh-system now updates CLAUDE.md on old/legacy headers and regenerates site; bump v0.4.14
 c9aaa14 feat: fix bedrock view browser open; eclectic site redesign with TOC, emojis, anchor links, richer color scheme; bump v0.4.13
 5252319 Update beads release issue state
-47919b3 Release v0.4.12
-d5dbae8 Remove legacy tracked bedrock outputs
-ddcba9b Clean active bedrock vault
-ca5e354 Simplify Bedrock cockpit structure
-e1cc79c bd init: initialize beads issue tracking
 ```
