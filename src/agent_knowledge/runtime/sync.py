@@ -13,6 +13,7 @@ import re
 import shutil
 import subprocess
 from pathlib import Path
+from typing import Any
 
 
 def _now_iso() -> str:
@@ -263,21 +264,51 @@ def run_sync(
     *,
     dry_run: bool = False,
     source_tool: str = "cli",
-) -> dict[str, list[str]]:
-    """Run all sync steps. Returns a dict of step -> action list."""
-    results: dict[str, list[str]] = {}
+) -> dict[str, Any]:
+    """Run all sync steps.
+
+    Returns the run's ``action``, the layout versions it compared, a ``steps``
+    map of step -> action list, and any ``warnings``.
+    """
+    from agent_knowledge.runtime import migrations as _migrations
+
+    steps: dict[str, list[str]] = {}
+    warnings: list[str] = []
+
+    project_layout = _migrations.read_layout_version(repo)
+    if project_layout > _migrations.LAYOUT_VERSION:
+        # Write nothing. SessionStart runs "sync && refresh-system", so sync is
+        # the first thing an older install would use to revert a newer vault --
+        # guarding only refresh-system would leave the loop wide open.
+        warnings.append(
+            f"This project uses bedrock layout {project_layout}; this install understands "
+            f"{_migrations.LAYOUT_VERSION}. Run: pip install -U project-bedrock"
+        )
+        return {
+            "action": "blocked",
+            "layout_version": _migrations.LAYOUT_VERSION,
+            "project_layout_version": project_layout,
+            "steps": {},
+            "warnings": warnings,
+        }
 
     version_warning = _check_framework_version(repo)
     if version_warning:
         import sys
         print(version_warning, file=sys.stderr)
 
-    results["memory-branches"] = sync_memory_branches(repo, dry_run=dry_run)
-    results["git-evidence"] = extract_git_log(repo, dry_run=dry_run)
-    results["history"] = _update_history(repo, dry_run=dry_run)
-    results["index"] = _regenerate_index(repo, dry_run=dry_run)
+    steps["memory-branches"] = sync_memory_branches(repo, dry_run=dry_run)
+    steps["git-evidence"] = extract_git_log(repo, dry_run=dry_run)
+    steps["history"] = _update_history(repo, dry_run=dry_run)
+    steps["index"] = _regenerate_index(repo, dry_run=dry_run)
 
     if not dry_run:
         stamp_status(repo, "last_project_sync")
 
-    return results
+    return {
+        "action": "dry-run" if dry_run else "synced",
+        "layout_version": _migrations.LAYOUT_VERSION,
+        "project_layout_version": project_layout,
+        "steps": steps,
+        "warnings": warnings,
+    }

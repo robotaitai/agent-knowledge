@@ -123,12 +123,16 @@ change no layout and leave it alone.
 - **Your install is newer than the project:** `refresh-system` applies the
   pending migrations in order and records the new version. This happens
   automatically from the `SessionStart` hook.
-- **Your install is older than the project:** `refresh-system` writes nothing
-  and tells you to upgrade. Without this, the older teammate would revert the
-  layout on every session and the newer one would restore it, forever.
+- **Your install is older than the project:** both `sync` and `refresh-system`
+  write nothing and tell you to upgrade. Without this, the older teammate would
+  revert the layout on every session and the newer one would restore it,
+  forever. The guard covers both because `SessionStart` runs them together as
+  `bedrock sync && bedrock refresh-system` -- guarding only the second one
+  would leave `sync` free to rewrite the vault first.
 
-A blocked refresh still exits 0, because it runs from a session hook where a
-non-zero exit would take the whole session down with it. `bedrock doctor`
+A blocked run still exits 0, because it happens in a session hook where a
+non-zero exit would take the whole session down with it -- and where failing
+`sync` would stop `refresh-system` from ever reporting why. `bedrock doctor`
 reports which side of the gap you are on.
 
 Migrations only ever move data; nothing is deleted, so

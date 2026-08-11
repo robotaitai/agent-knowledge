@@ -250,17 +250,28 @@ def sync(project: str, dry_run: bool, json_mode: bool) -> None:
     from agent_knowledge.runtime.sync import run_sync
 
     repo_path = Path(_resolve_project(project))
-    results = run_sync(repo_path, dry_run=dry_run)
+    result = run_sync(repo_path, dry_run=dry_run)
 
     if json_mode:
-        click.echo(json_mod.dumps({"sync": results}, indent=2))
+        # Step keys stay at the top level of "sync" for backward compatibility.
+        payload = dict(result["steps"])
+        payload["action"] = result["action"]
+        payload["warnings"] = result["warnings"]
+        click.echo(json_mod.dumps({"sync": payload}, indent=2))
     else:
-        for step, actions in results.items():
+        for step, actions in result["steps"].items():
             click.echo(f"[{step}]", err=True)
             for action in actions:
                 click.echo(action, err=True)
             click.echo("", err=True)
 
+        for warning in result["warnings"]:
+            click.secho(warning, fg="yellow", err=True)
+
+        if result["action"] == "blocked":
+            # Exits 0: this runs from SessionStart joined by &&, so failing here
+            # would take down the whole agent session.
+            return
         if dry_run:
             click.echo("(dry-run -- no changes written)", err=True)
         else:

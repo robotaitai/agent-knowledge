@@ -2568,6 +2568,26 @@ def test_refresh_system_exits_zero_when_blocked_by_a_newer_layout(tmp_path: Path
     assert "Refreshed to v" not in r.stderr, "a blocked run must not claim it refreshed anything"
 
 
+def test_sync_exits_zero_when_blocked_by_a_newer_layout(tmp_path: Path):
+    """sync is the first half of 'bedrock sync && bedrock refresh-system'.
+
+    A non-zero exit here would both fail the session and stop refresh-system
+    from ever running to report why.
+    """
+    from agent_knowledge.runtime.migrations import LAYOUT_VERSION
+
+    repo = _init_repo(tmp_path, "layout-newer-sync")
+    kh = tmp_path / "kh"
+    _run("init", "--repo", str(repo), "--knowledge-home", str(kh))
+    _set_layout_version(repo, LAYOUT_VERSION + 1)
+
+    r = _run("sync", "--project", str(repo))
+
+    assert r.returncode == 0, f"a blocked sync must not fail the SessionStart hook: {r.stderr}"
+    assert "pip install -U project-bedrock" in r.stderr
+    assert "Sync complete" not in r.stderr, "a blocked run must not claim it synced anything"
+
+
 def test_doctor_warns_when_the_project_layout_is_newer(tmp_path: Path):
     """doctor must tell you which side of the version gap you are on."""
     from agent_knowledge.runtime.migrations import LAYOUT_VERSION

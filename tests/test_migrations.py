@@ -400,3 +400,38 @@ def test_refresh_at_the_same_layout_reports_both_versions(tmp_path: Path, monkey
     assert result["layout_version"] == 2
     assert result["project_layout_version"] == 2
     assert result["action"] != "blocked"
+
+
+# --------------------------------------------------------------------------- #
+# Wiring into sync                                                             #
+# --------------------------------------------------------------------------- #
+
+
+def test_sync_refuses_to_write_to_a_newer_project(tmp_path: Path):
+    """The guard has to cover sync too, or it does not cover the hook.
+
+    SessionStart runs 'bedrock sync && bedrock refresh-system'. sync goes first,
+    so guarding only refresh-system leaves the older teammate still rewriting
+    the vault on every session -- the exact loop the guard exists to stop.
+    """
+    from agent_knowledge.runtime.sync import run_sync
+
+    repo = _vault(tmp_path, layout=str(migrations.LAYOUT_VERSION + 1))
+    before = _snapshot(repo)
+
+    result = run_sync(repo, dry_run=False)
+
+    assert result["action"] == "blocked"
+    assert any("pip install -U project-bedrock" in w for w in result["warnings"])
+    assert _snapshot(repo) == before, "a blocked sync must write nothing at all"
+
+
+def test_sync_runs_normally_on_a_matching_layout(tmp_path: Path):
+    """The guard must only fire on a newer project, never on an equal one."""
+    from agent_knowledge.runtime.sync import run_sync
+
+    repo = _vault(tmp_path, layout=str(migrations.LAYOUT_VERSION))
+
+    result = run_sync(repo, dry_run=False)
+
+    assert result["action"] != "blocked"
