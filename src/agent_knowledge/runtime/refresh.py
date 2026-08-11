@@ -46,8 +46,10 @@ def _write(path: Path, content: str, *, dry_run: bool) -> str:
     path.parent.mkdir(parents=True, exist_ok=True)
     # newline="\n" pins LF: the default translates to os.linesep, which would
     # rewrite these files as CRLF on Windows and desync them from the shell
-    # scripts that rewrite the same frontmatter with LF.
-    path.write_text(content, encoding="utf-8", newline="\n")
+    # scripts that rewrite the same frontmatter with LF. Written via open()
+    # because Path.write_text() only accepts newline on Python 3.10+.
+    with path.open("w", encoding="utf-8", newline="\n") as fh:
+        fh.write(content)
     return "updated"
 
 

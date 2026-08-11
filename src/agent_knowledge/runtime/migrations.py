@@ -121,7 +121,9 @@ def stamp_layout_version(repo_root: Path, version: int, *, dry_run: bool) -> boo
         return True
     # newline="\n" pins LF; the default would rewrite STATUS.md as CRLF on
     # Windows, where the shell rewrite of the same frontmatter emits LF.
-    _status_path(repo_root).write_text(updated, encoding="utf-8", newline="\n")
+    # Written via open() because Path.write_text() only accepts newline on 3.10+.
+    with _status_path(repo_root).open("w", encoding="utf-8", newline="\n") as fh:
+        fh.write(updated)
     return True
 
 
