@@ -198,7 +198,7 @@ def init(
         _maybe_star()
 
 
-_REPO_URL = "https://github.com/robotaitai/agent-knowledge"
+_REPO_URL = "https://github.com/robotaitai/project-bedrock"
 _STAR_MARKER = Path.home() / ".bedrock-starred"
 
 

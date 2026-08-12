@@ -214,7 +214,7 @@ def fetch_url(url: str, *, timeout: int = 15) -> str:
     req = urllib.request.Request(
         url,
         headers={
-            "User-Agent": "agent-knowledge/import (https://github.com/robotaitai/agent-knowledge)",
+            "User-Agent": "project-bedrock/import (https://github.com/robotaitai/project-bedrock)",
             "Accept": "text/html,application/xhtml+xml,*/*",
         },
     )
