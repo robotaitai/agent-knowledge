@@ -1,7 +1,7 @@
 ---
 note_type: evidence
 source: git-log
-extracted: 2026-08-11T00:06:52Z
+extracted: 2026-08-11T00:37:46Z
 commits: 30
 ---
 
@@ -10,6 +10,7 @@ commits: 30
 Last 30 commits as of 2026-08-11.
 
 ```
+7fa6b7a chore: sync vault
 c98c3f4 chore: export beads issues
 f2bfa9d fix: guard sync against a newer project layout
 e34521c fix: Path.write_text(newline=) requires Python 3.10, project supports 3.9
@@ -39,5 +40,4 @@ e674e0e fix: scope layout version reads to frontmatter and report stamp failures
 0a14bb0 feat: sync warns agent on framework version mismatch at session start; bump v0.4.15
 6406812 fix: refresh-system now updates CLAUDE.md on old/legacy headers and regenerates site; bump v0.4.14
 c9aaa14 feat: fix bedrock view browser open; eclectic site redesign with TOC, emojis, anchor links, richer color scheme; bump v0.4.13
-5252319 Update beads release issue state
 ```
