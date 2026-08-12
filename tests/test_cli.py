@@ -2736,3 +2736,37 @@ def test_status_frontmatter_managed_key_lists_agree():
     # 'profile' is the legacy alias of profile_hint: skipped on read, never emitted.
     assert awk_keys - printf_keys == {"profile"}
     assert printf_keys - awk_keys == set()
+
+
+# -- migrate-from-legacy --------------------------------------------------- #
+
+
+def test_migrate_from_legacy_runs(tmp_path: Path):
+    """The documented upgrade path from agent-knowledge-cli must actually run.
+
+    It had no coverage at all, which is how it shipped calling run_refresh with
+    a json_mode kwarg that does not exist.
+    """
+    repo = _init_repo(tmp_path, "legacy-migrate")
+    kh = tmp_path / "kh"
+    _run("init", "--repo", str(repo), "--knowledge-home", str(kh))
+
+    r = _run("migrate-from-legacy", "--project", str(repo))
+
+    assert r.returncode == 0, f"migrate-from-legacy crashed: {r.stderr}"
+    assert "Traceback" not in r.stderr
+    assert "pip uninstall agent-knowledge-cli" in r.stdout
+
+
+def test_migrate_from_legacy_reports_a_refresh_it_actually_did(tmp_path: Path):
+    """It must report the real refresh outcome, not compare a dict to a string."""
+    repo = _init_repo(tmp_path, "legacy-migrate-report")
+    kh = tmp_path / "kh"
+    _run("init", "--repo", str(repo), "--knowledge-home", str(kh))
+    _run("refresh-system", "--project", str(repo))
+
+    # Second migrate on an already-current project: nothing left to change.
+    r = _run("migrate-from-legacy", "--project", str(repo))
+
+    assert r.returncode == 0, f"migrate-from-legacy crashed: {r.stderr}"
+    assert "already up to date" in r.stdout.lower()

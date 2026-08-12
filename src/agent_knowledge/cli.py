@@ -1457,9 +1457,15 @@ def migrate_from_legacy(project: str, dry_run: bool) -> None:
         click.echo("(dry-run mode -- no files will be changed)")
 
     # Step 1: refresh-system updates hooks/rules/commands to use 'bedrock'
-    action = run_refresh(repo_root, dry_run=dry_run, json_mode=False)
+    result = run_refresh(repo_root, dry_run=dry_run)
 
-    if action == "up-to-date":
+    for warning in result.get("warnings", []):
+        click.secho(warning, fg="yellow", err=True)
+
+    if result["action"] == "blocked":
+        # An older install must not rewrite a newer project's integration files.
+        return
+    if result["action"] == "up-to-date":
         click.secho("Integration files already up to date.", fg="green")
     else:
         click.secho("Integration files refreshed.", fg="green")
