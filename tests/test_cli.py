@@ -6,6 +6,7 @@ import json
 import re
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -2736,6 +2737,118 @@ def test_status_frontmatter_managed_key_lists_agree():
     # 'profile' is the legacy alias of profile_hint: skipped on read, never emitted.
     assert awk_keys - printf_keys == {"profile"}
     assert printf_keys - awk_keys == set()
+
+
+def _run_lib_shell(script: str, timeout: int = 120) -> subprocess.CompletedProcess[str]:
+    """Source knowledge-common.sh and run a snippet against it."""
+    full = f'. "{_common_lib()}"\n{script}'
+    return subprocess.run(["bash", "-c", full], capture_output=True, text=True, timeout=timeout)
+
+
+def test_yaml_leaf_value_strips_cr_on_crlf_files(tmp_path: Path):
+    """A CRLF checkout must not leak \\r into every parsed frontmatter value.
+
+    Git for Windows defaults to core.autocrlf=true, so the record awk sees
+    ends in \\r: the value carries it, and the trailing-quote strip misses
+    because the quote is no longer at end-of-record.
+    """
+    f = tmp_path / "PROJECT.md"
+    f.write_bytes(b'---\r\nname: demo\r\nslug: "demo-slug"\r\n---\r\n')
+
+    # Bytes on purpose: text=True's universal newlines would hide the \r.
+    script = (
+        f'. "{_common_lib()}"\n'
+        f'kc_yaml_leaf_value "{f}" name\n'
+        f'kc_yaml_leaf_value "{f}" slug\n'
+    )
+    r = subprocess.run(["bash", "-c", script], capture_output=True, timeout=120)
+
+    assert r.returncode == 0, r.stderr
+    assert r.stdout == b"demo\ndemo-slug\n"
+
+
+def test_normalize_relative_path_sets_caller_named_variable():
+    """kc_normalize_relative_path must return via a variable, not stdout.
+
+    It is pure parameter expansion called tens of thousands of times per
+    init; a $(...) caller forks a subshell each time (agent-knowledge-3x7).
+    """
+    r = _run_lib_shell(
+        'kc_normalize_relative_path out "./foo/bar"\n'
+        'printf "<%s>" "$out"\n'
+        'kc_normalize_relative_path out "/abs/path"\n'
+        'printf "<%s>" "$out"\n'
+        'kc_normalize_relative_path out ""\n'
+        'printf "<%s>" "$out"\n'
+    )
+
+    assert r.returncode == 0, r.stderr
+    assert r.stdout == "<foo/bar><abs/path><>"
+
+
+def test_filter_relative_lines_honors_ignore_patterns(tmp_path: Path):
+    """Ignore semantics through the real loader: dir/, anchored, bare, glob."""
+    repo = tmp_path / "proj"
+    repo.mkdir()
+    (repo / ".agentknowledgeignore").write_text(
+        "# comment\n"
+        "\n"
+        "./docs/\n"
+        "/secrets\n"
+        "build\n"
+        "*.log\n",
+        encoding="utf-8",
+    )
+
+    r = _run_lib_shell(
+        f'kc_load_project_context "{repo}"\n'
+        "kc_filter_relative_lines <<'EOF'\n"
+        "./docs/a.md\n"
+        "secrets/key\n"
+        "src/main.py\n"
+        "build\n"
+        "buildx/file\n"
+        "debug.log\n"
+        "EOF\n"
+    )
+
+    assert r.returncode == 0, r.stderr
+    assert r.stdout == "src/main.py\nbuildx/file\n"
+
+
+def test_filter_relative_lines_does_not_fork_per_pattern(tmp_path: Path):
+    """1000 lines against 20 patterns must be near-instant builtin work.
+
+    The old shape forked 2 + N_patterns subshells per line (22k forks
+    here), which is what made init 16s (agent-knowledge-3x7). The 8s bound
+    is ~50x headroom for the builtin version even on a loaded machine.
+    """
+    repo = tmp_path / "proj"
+    repo.mkdir()
+    patterns = ["vendor/", "node_modules/"] + [f"pat{i}" for i in range(18)]
+    (repo / ".agentknowledgeignore").write_text("\n".join(patterns) + "\n", encoding="utf-8")
+
+    script = (
+        f'kc_load_project_context "{repo}"\n'
+        "i=0\n"
+        "lines=\"\"\n"
+        'while [ "$i" -lt 1000 ]; do\n'
+        '    lines="${lines}src/file_${i}.py\n'
+        '"\n'
+        "    i=$((i+1))\n"
+        "done\n"
+        'lines="${lines}vendor/skipme.py\n'
+        '"\n'
+        'printf "%s" "$lines" | kc_filter_relative_lines | wc -l\n'
+    )
+
+    start = time.monotonic()
+    r = _run_lib_shell(script, timeout=180)
+    elapsed = time.monotonic() - start
+
+    assert r.returncode == 0, r.stderr
+    assert r.stdout.strip() == "1000"
+    assert elapsed < 8.0, f"kc_filter_relative_lines took {elapsed:.1f}s for 1000 lines"
 
 
 # -- migrate-from-legacy --------------------------------------------------- #
