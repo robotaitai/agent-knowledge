@@ -1,15 +1,18 @@
 ---
 note_type: evidence
 source: git-log
-extracted: 2026-08-11T00:37:46Z
+extracted: 2026-08-19T22:10:25Z
 commits: 30
 ---
 
 # Recent Git History
 
-Last 30 commits as of 2026-08-11.
+Last 30 commits as of 2026-08-20.
 
 ```
+7830785 chore: sync vault and beads export
+1e07acc fix: migrate-from-legacy crashed on every run
+f01e91b fix: point at the project-bedrock repo, not the pre-rename name
 7fa6b7a chore: sync vault
 c98c3f4 chore: export beads issues
 f2bfa9d fix: guard sync against a newer project layout
@@ -37,7 +40,4 @@ e674e0e fix: scope layout version reads to frontmatter and report stamp failures
 38750db fix: portable generated configs, non-destructive refresh, per-area memory; bump v0.4.17
 0b8de26 fix: repair `bedrock view` navigation; harden update path against legacy installs; bump v0.4.16
 5e43bf7 feat: add install.sh caveman installer (uv -> pipx -> pip); document in README
-0a14bb0 feat: sync warns agent on framework version mismatch at session start; bump v0.4.15
-6406812 fix: refresh-system now updates CLAUDE.md on old/legacy headers and regenerates site; bump v0.4.14
-c9aaa14 feat: fix bedrock view browser open; eclectic site redesign with TOC, emojis, anchor links, richer color scheme; bump v0.4.13
 ```

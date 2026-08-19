@@ -1,7 +1,7 @@
 ---
 note_type: durable-branch
 area: gotchas
-updated: 2026-05-05
+updated: 2026-08-20
 tags:
   - agent-knowledge
   - memory
@@ -20,6 +20,9 @@ Known pitfalls, traps, and non-obvious behaviors.
 
 - `set -euo pipefail` + trailing `[ "$DRY_RUN" -eq 1 ] && log ...` causes exit 1 when test is false. Use `if/then` instead. See [[conventions]].
 - `ship.sh` uses `python -m pytest -q` not bare `pytest` -- bare `pytest` fails outside venvs. See [[testing]].
+- `kc_normalize_relative_path` returns via a caller-named variable (`kc_normalize_relative_path out "$path"`), NOT stdout. Never call it with `$(...)` -- the stdout form was removed because command-substitution forks made init 16s (agent-knowledge-3x7). `KC_IGNORE_PATTERNS` entries are pre-normalized at load time.
+- `import-agent-history.sh` `list_top_level_dirs` dies silently (grep -Ev matches nothing → pipefail → set -e) on repos where every top-level dir is filtered, and `init` swallows the failure. Open: agent-knowledge-10p.
+- `kc_yaml_leaf_value` strips a trailing `\r`, so CRLF checkouts (Git for Windows autocrlf) parse clean frontmatter values. Fixed 2026-08-20 (agent-knowledge-2fy).
 
 ## 🐍 Python / pip
 
@@ -52,10 +55,15 @@ Known pitfalls, traps, and non-obvious behaviors.
 
 - **Trusted publishing broken**: PyPI trusted publisher config does not match the workflow. Publishing is done manually via twine. To fix: remove the trusted publisher on PyPI and re-add it without an environment field. See [[packaging#PyPI Publish]].
 
+## 🍎 Rosetta / Apple Silicon
+
+- An x86_64 Python (this repo's `.venv` is one) runs under Rosetta 2 on Apple Silicon, and its children get the x86_64 slice of universal binaries -- bash and everything it forks run translated at ~7x cost (measured: same script 14.1s translated vs 1.9s native). `run_bash_script` in `runtime/shell.py` escapes via `arch -arm64` when `sysctl.proc_translated` is 1. pytest itself still runs translated; rebuilding `.venv` with an arm64 python would speed the suite ~7x.
+
 ## 🕓 Recent Changes
 
 - 2026-04-28: Documented f-string backslash `SyntaxError` on Python < 3.12; fixed in `runtime/site.py`.
 - 2026-05-05: Documented Windows cp1255 encoding crash; fixed in v0.4.4. Documented JS wikilink regex bug; fixed in v0.4.3. Documented PyPI trusted publishing breakage.
+- 2026-08-20: Fixed CRLF leak in `kc_yaml_leaf_value` (agent-knowledge-2fy) and the 16s init (agent-knowledge-3x7: fork-per-call in the path filter + Rosetta-translated bash children). Documented the Rosetta section and the `list_top_level_dirs` silent-death pitfall (agent-knowledge-10p).
 
 ## 🔗 See Also
 
