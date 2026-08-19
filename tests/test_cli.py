@@ -2020,6 +2020,77 @@ def test_view_skips_browser_without_a_display(tmp_path: Path):
     assert "index.html" in r.stderr, "the path to open must be printed when the browser is skipped"
 
 
+def test_view_names_serve_over_ssh(tmp_path: Path):
+    """Over SSH the printed file:// path is on the wrong machine, so name --serve.
+
+    A remote path pasted into a browser on the client resolves against the
+    *client's* filesystem, where it does not exist. Printing it by itself reads
+    like a working remedy and sends people debugging a rendering problem that
+    is not there, while --serve -- which already exists and is forwardable --
+    goes unmentioned at the one moment it is needed.
+    """
+    import os
+
+    repo = _init_repo(tmp_path, "ssh-view-hint")
+    kh = tmp_path / "kh"
+    _run("init", "--repo", str(repo), "--knowledge-home", str(kh))
+
+    env = {k: v for k, v in os.environ.items() if k not in ("DISPLAY", "WAYLAND_DISPLAY")}
+    env["SSH_CONNECTION"] = "10.0.0.1 22 10.0.0.2 22"
+    r = subprocess.run(
+        [*BIN, "view", "--project", str(repo)],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        env=env,
+    )
+    assert r.returncode == 0, f"view must succeed over ssh: {r.stderr}"
+    assert "--serve" in r.stderr, (
+        f"the ssh fallback must point at --serve, got: {r.stderr!r}"
+    )
+
+
+def test_has_display_accepts_a_forwarded_display_over_ssh(monkeypatch):
+    """ssh -X sets DISPLAY, and that browser genuinely works.
+
+    Rejecting every SSH session outright ignores the forwarded case, so the one
+    remote setup that *can* open a browser is told it cannot.
+    """
+    from agent_knowledge.runtime import shell
+
+    monkeypatch.setattr(shell.sys, "platform", "linux")
+    monkeypatch.setenv("SSH_CONNECTION", "10.0.0.1 22 10.0.0.2 22")
+    monkeypatch.setenv("DISPLAY", "localhost:10.0")
+
+    assert shell.has_display(), "a forwarded DISPLAY over ssh is a usable display"
+
+
+def test_has_display_rejects_ssh_without_a_forwarded_display(monkeypatch):
+    """A plain SSH session has no DISPLAY, and must still be treated as headless."""
+    from agent_knowledge.runtime import shell
+
+    monkeypatch.setattr(shell.sys, "platform", "linux")
+    monkeypatch.setenv("SSH_CONNECTION", "10.0.0.1 22 10.0.0.2 22")
+    monkeypatch.delenv("DISPLAY", raising=False)
+    monkeypatch.delenv("WAYLAND_DISPLAY", raising=False)
+
+    assert not shell.has_display(), "plain ssh has no browser to open"
+
+
+def test_has_display_rejects_ssh_into_a_mac(monkeypatch):
+    """On darwin/win32 a display is assumed, but not for someone SSH'd in.
+
+    The launcher would open a browser on the remote console, which nobody is
+    sitting at.
+    """
+    from agent_knowledge.runtime import shell
+
+    monkeypatch.setattr(shell.sys, "platform", "darwin")
+    monkeypatch.setenv("SSH_CONNECTION", "10.0.0.1 22 10.0.0.2 22")
+
+    assert not shell.has_display(), "ssh into a mac must not open the console browser"
+
+
 def test_view_no_open_flag(tmp_path: Path):
     """--no-open must generate the site without launching a browser."""
     repo = _init_repo(tmp_path, "view-no-open")

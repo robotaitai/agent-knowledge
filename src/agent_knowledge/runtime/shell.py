@@ -68,17 +68,31 @@ def run_python_script(name: str, args: list[str]) -> int:
     return result.returncode
 
 
+def is_remote_session() -> bool:
+    """Whether this shell is an SSH session onto some other machine.
+
+    Callers need this to know whether a local path is worth printing at all: a
+    file:// URI handed to a browser on the client resolves against the
+    *client's* filesystem, where it does not exist.
+    """
+    return bool(os.environ.get("SSH_CONNECTION") or os.environ.get("SSH_TTY"))
+
+
 def has_display() -> bool:
     """Whether a GUI browser can plausibly be opened here.
 
-    A headless box or an SSH session has no browser to open; treating that as a
-    normal environment (print the path instead) beats letting the launcher fail
-    after the shell prompt has already returned.
+    A headless box has no browser to open; treating that as a normal
+    environment (print the path instead) beats letting the launcher fail after
+    the shell prompt has already returned.
+
+    SSH is not headless by definition -- `ssh -X` forwards a real, usable
+    display -- so a remote session is judged by DISPLAY like any other. Only
+    darwin and win32, where a display is assumed rather than advertised in the
+    environment, need the remote case ruled out explicitly: there the launcher
+    would open a browser on a console nobody is sitting at.
     """
-    if os.environ.get("SSH_CONNECTION") or os.environ.get("SSH_TTY"):
-        return False
     if sys.platform == "darwin" or sys.platform == "win32":
-        return True
+        return not is_remote_session()
     return bool(os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
 
 

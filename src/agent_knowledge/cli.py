@@ -11,14 +11,34 @@ import click
 
 from agent_knowledge import __version__
 from agent_knowledge.runtime.paths import get_assets_dir
-from agent_knowledge.runtime.shell import open_in_browser, run_bash_script, run_python_script
+from agent_knowledge.runtime.shell import (
+    is_remote_session,
+    open_in_browser,
+    run_bash_script,
+    run_python_script,
+)
 
 
 def _open_in_browser(target: Path | str) -> None:
-    """Open a local file or URL in the system browser, or print it if there is none."""
-    target = target.as_uri() if isinstance(target, Path) else target
-    if not open_in_browser(target):
-        click.echo(f"no display detected; open it yourself: {target}", err=True)
+    """Open a local file or URL in the system browser, or say how to reach it.
+
+    Over SSH a local file is the one case where printing the path is actively
+    misleading: it names a file on *this* host, so pasting it into a browser on
+    the client opens nothing and reads like a broken page rather than a missing
+    browser. `--serve` already solves it, and is worth naming here because
+    nobody runs `--help` on a command that appeared to succeed. A URL is
+    unaffected -- it resolves the same from either end.
+    """
+    is_local_file = isinstance(target, Path)
+    target = target.as_uri() if is_local_file else target
+    if open_in_browser(target):
+        return
+    if is_local_file and is_remote_session():
+        click.echo(f"no browser in this ssh session; that path is on the remote host: {target}", err=True)
+        click.echo("it will not resolve in a browser on your local machine -- run "
+                   "`bedrock view --serve` instead and forward the port.", err=True)
+        return
+    click.echo(f"no display detected; open it yourself: {target}", err=True)
 
 
 def _add_common_flags(
