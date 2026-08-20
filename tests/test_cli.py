@@ -2000,25 +2000,164 @@ def test_merge_replaces_every_generated_command_shape(stale: str):
     assert commands == ["bedrock sync --project ."], f"stale command not replaced: {stale}"
 
 
-def test_view_skips_browser_without_a_display(tmp_path: Path):
-    """view must print the path instead of failing when there is no display (SSH/headless)."""
+_SSH_CONNECTION = "10.0.0.1 22 10.0.0.2 22"
+
+
+def _scrubbed_env(overrides: dict[str, str]) -> dict[str, str]:
+    """The inherited environment minus everything display/SSH-related."""
     import os
 
-    repo = _init_repo(tmp_path, "headless-view")
+    scrub = ("DISPLAY", "WAYLAND_DISPLAY", "SSH_CONNECTION", "SSH_TTY", "BROWSER")
+    env = {k: v for k, v in os.environ.items() if k not in scrub}
+    env.update(overrides)
+    return env
+
+
+def _run_view(tmp_path: Path, name: str, env_overrides: dict[str, str]):
+    """Init a repo and run `view --project` under a scrubbed environment."""
+    repo = _init_repo(tmp_path, name)
     kh = tmp_path / "kh"
     _run("init", "--repo", str(repo), "--knowledge-home", str(kh))
 
-    env = {k: v for k, v in os.environ.items() if k not in ("DISPLAY", "WAYLAND_DISPLAY")}
-    env["SSH_CONNECTION"] = "10.0.0.1 22 10.0.0.2 22"
     r = subprocess.run(
         [*BIN, "view", "--project", str(repo)],
         capture_output=True,
         text=True,
         timeout=60,
-        env=env,
+        env=_scrubbed_env(env_overrides),
     )
+    return r, repo
+
+
+def test_view_skips_browser_without_a_display(tmp_path: Path):
+    """Plain headless (no SSH): view must print the path instead of failing.
+
+    BROWSER points at a nonexistent binary so the launch fails even on
+    platforms like darwin that assume a display; on headless Linux the DISPLAY
+    scrub alone reaches the same branch. Either way this covers the generic
+    fallback, not the SSH one.
+    """
+    r, _ = _run_view(tmp_path, "headless-view", {"BROWSER": "/nonexistent/not-a-browser"})
+
     assert r.returncode == 0, f"view must succeed headless: {r.stderr}"
+    assert "no display detected" in r.stderr, f"expected the generic fallback, got: {r.stderr!r}"
     assert "index.html" in r.stderr, "the path to open must be printed when the browser is skipped"
+
+
+def test_view_names_serve_over_ssh(tmp_path: Path):
+    """Over SSH the printed file:// path is on the wrong machine, so name --serve.
+
+    A remote path pasted into a browser on the client resolves against the
+    *client's* filesystem, where it does not exist. The hint must also be
+    runnable verbatim: view was invoked with --project, so the suggested
+    command has to carry it too.
+    """
+    r, repo = _run_view(tmp_path, "ssh-view-hint", {"SSH_CONNECTION": _SSH_CONNECTION})
+
+    assert r.returncode == 0, f"view must succeed over ssh: {r.stderr}"
+    assert "--serve" in r.stderr, f"the ssh fallback must point at --serve, got: {r.stderr!r}"
+    assert "--project" in r.stderr, (
+        f"the hinted command must carry the user's --project to run verbatim, got: {r.stderr!r}"
+    )
+
+
+def test_export_html_over_ssh_does_not_point_at_a_different_command(tmp_path: Path):
+    """export-html --open over SSH must not advertise `bedrock view --serve`.
+
+    view cannot reproduce export-html's flags (--output-dir, evidence
+    selection), so that remedy would rebuild and serve a different site than
+    the one just exported. The remote-host warning still applies; a wrong
+    command does not.
+    """
+    repo = _init_repo(tmp_path, "ssh-export-hint")
+    kh = tmp_path / "kh"
+    _run("init", "--repo", str(repo), "--knowledge-home", str(kh))
+
+    out = tmp_path / "exported-site"
+    r = subprocess.run(
+        [*BIN, "export-html", "--project", str(repo), "--output-dir", str(out), "--open"],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        env=_scrubbed_env({"SSH_CONNECTION": _SSH_CONNECTION}),
+    )
+
+    assert r.returncode == 0, f"export-html must succeed over ssh: {r.stderr}"
+    assert "remote host" in r.stderr, f"the remote-host warning must still print, got: {r.stderr!r}"
+    assert "bedrock view --serve" not in r.stderr, (
+        f"the hint must not name a command that serves a different build, got: {r.stderr!r}"
+    )
+
+
+def test_has_display_accepts_a_forwarded_display_over_ssh(monkeypatch):
+    """ssh -X sets DISPLAY, and that browser genuinely works.
+
+    Rejecting every SSH session outright ignores the forwarded case, so the one
+    remote setup that *can* open a browser is told it cannot.
+    """
+    from agent_knowledge.runtime import shell
+
+    monkeypatch.setattr(shell.sys, "platform", "linux")
+    monkeypatch.setenv("SSH_CONNECTION", "10.0.0.1 22 10.0.0.2 22")
+    monkeypatch.setenv("DISPLAY", "localhost:10.0")
+
+    assert shell.has_display(), "a forwarded DISPLAY over ssh is a usable display"
+
+
+def test_has_display_rejects_ssh_without_a_forwarded_display(monkeypatch):
+    """A plain SSH session has no DISPLAY, and must still be treated as headless."""
+    from agent_knowledge.runtime import shell
+
+    monkeypatch.setattr(shell.sys, "platform", "linux")
+    monkeypatch.setenv("SSH_CONNECTION", "10.0.0.1 22 10.0.0.2 22")
+    monkeypatch.delenv("DISPLAY", raising=False)
+    monkeypatch.delenv("WAYLAND_DISPLAY", raising=False)
+
+    assert not shell.has_display(), "plain ssh has no browser to open"
+
+
+def test_has_display_rejects_ssh_into_a_mac(monkeypatch):
+    """On darwin/win32 a display is assumed, but not for someone SSH'd in.
+
+    The launcher would open a browser on the remote console, which nobody is
+    sitting at.
+    """
+    from agent_knowledge.runtime import shell
+
+    monkeypatch.setattr(shell.sys, "platform", "darwin")
+    monkeypatch.setenv("SSH_CONNECTION", "10.0.0.1 22 10.0.0.2 22")
+
+    assert not shell.has_display(), "ssh into a mac must not open the console browser"
+
+
+def test_has_display_rejects_a_console_display_leaked_into_ssh(monkeypatch):
+    """DISPLAY=:0 inside a remote session is the machine's own console, not ours.
+
+    Dotfiles that export DISPLAY=:0 (or a reattached tmux env) would otherwise
+    make an SSH session open the browser on a screen nobody is sitting at --
+    the same failure the darwin branch rules out. sshd allocates forwarded
+    displays as localhost:N or at X11DisplayOffset (default 10) and up.
+    """
+    from agent_knowledge.runtime import shell
+
+    monkeypatch.setattr(shell.sys, "platform", "linux")
+    monkeypatch.setenv("SSH_CONNECTION", "10.0.0.1 22 10.0.0.2 22")
+    monkeypatch.setenv("DISPLAY", ":0")
+    monkeypatch.delenv("WAYLAND_DISPLAY", raising=False)
+
+    assert not shell.has_display(), "a console DISPLAY over ssh is not the user's display"
+
+
+def test_has_display_rejects_wayland_leaked_into_ssh(monkeypatch):
+    """WAYLAND_DISPLAY cannot be forwarded by ssh; remotely it is console leakage."""
+    from agent_knowledge.runtime import shell
+
+    monkeypatch.setattr(shell.sys, "platform", "linux")
+    monkeypatch.setenv("SSH_CONNECTION", "10.0.0.1 22 10.0.0.2 22")
+    monkeypatch.delenv("DISPLAY", raising=False)
+    monkeypatch.setenv("WAYLAND_DISPLAY", "wayland-0")
+
+    assert not shell.has_display(), "wayland is never forwarded over ssh"
 
 
 def test_view_no_open_flag(tmp_path: Path):
@@ -2072,15 +2211,24 @@ def test_star_prompt_does_not_launch_a_browser_without_a_display(monkeypatch, tm
     scribbles over the next prompt, which is the whole point of the display guard.
     """
     import io
-    import webbrowser
 
     from agent_knowledge import cli
+    from agent_knowledge.runtime import shell
 
-    opened: list[str] = []
-    monkeypatch.setattr(webbrowser, "open", lambda url, *a, **k: opened.append(url))
+    # A plain SSH session: remote, and no display of any kind. The launcher
+    # itself is patched at the layer the code really uses (subprocess.Popen --
+    # webbrowser is never called), so a regression here fails instead of
+    # spawning a real browser mid-suite.
+    monkeypatch.setenv("SSH_CONNECTION", "10.0.0.1 22 10.0.0.2 22")
+    monkeypatch.delenv("SSH_TTY", raising=False)
+    monkeypatch.delenv("DISPLAY", raising=False)
+    monkeypatch.delenv("WAYLAND_DISPLAY", raising=False)
+
+    launched: list[tuple] = []
+    monkeypatch.setattr(shell.subprocess, "Popen", lambda *a, **k: launched.append(a))
+    monkeypatch.setattr(shell.os, "startfile", lambda target: launched.append((target,)), raising=False)
     monkeypatch.setattr(cli, "_STAR_MARKER", tmp_path / "starred")
     monkeypatch.setattr(cli.click, "confirm", lambda *a, **k: True)
-    monkeypatch.setenv("SSH_CONNECTION", "10.0.0.1 22 10.0.0.2 22")
 
     class _Tty(io.StringIO):
         def isatty(self) -> bool:
@@ -2090,7 +2238,7 @@ def test_star_prompt_does_not_launch_a_browser_without_a_display(monkeypatch, tm
 
     cli._maybe_star()
 
-    assert opened == [], "the star prompt must go through the display-guarded opener"
+    assert launched == [], "the star prompt must go through the display-guarded opener"
 
 
 def test_star_prompt_opens_the_repo_when_a_display_exists(monkeypatch, tmp_path: Path):

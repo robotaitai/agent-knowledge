@@ -47,7 +47,9 @@ Use this file for important project decisions.
 
 ### 2026-08-10, Browser launches go through one display-guarded, non-blocking opener
 
-**Decision:** All browser launches route through `runtime/shell.py: open_in_browser()`. It returns False when there is no display (SSH, or Linux without `DISPLAY`/`WAYLAND_DISPLAY`) so the caller prints the path instead, honors `$BROWSER`, spawns via `Popen` without waiting, and discards the launcher's output.
+**Decision:** All browser launches route through `runtime/shell.py: open_in_browser()`. It returns False when there is no display so the caller prints the path instead, honors `$BROWSER`, spawns via `Popen` without waiting, and discards the launcher's output.
+
+**Amended 2026-08-20:** SSH no longer implies "no display": a remote session counts as having one when `DISPLAY` looks forwarded (`localhost:N`, or display number >= sshd's X11DisplayOffset default of 10). A leaked console `DISPLAY`/`WAYLAND_DISPLAY` inside SSH is still rejected, as is any remote darwin/win32 session. Tests must not simulate headless by setting `SSH_CONNECTION` alone -- clear `DISPLAY`/`WAYLAND_DISPLAY` too and patch `shell.subprocess.Popen`, not `webbrowser` (never called).
 
 **Why:** Three separate failure modes, one seam. A failed launcher's stderr arrives after the shell prompt has returned and corrupts the next prompt (GH #18). Waiting on the launcher stalls callers that still have work to do -- `bedrock view --serve` had a port left to bind, and on a GUI-less macOS box `open` blocks long enough to break it. Ignoring `$BROWSER` makes tests launch real browsers.
 

@@ -1,7 +1,7 @@
 ---
 note_type: evidence
 source: git-log
-extracted: 2026-08-20T05:43:16Z
+extracted: 2026-08-20T11:12:40Z
 commits: 30
 ---
 
@@ -10,8 +10,13 @@ commits: 30
 Last 30 commits as of 2026-08-20.
 
 ```
+3afdee2 Merge remote-tracking branch 'origin/release/0.4.17' into fix/view-ssh-serve-hint
+229ed26 chore: beads export
+7dbe8ff chore: sync vault
+79863df chore: sync vault
 ad37784 chore: sync vault and beads export
 2c7a4d0 fix: strip CRLF in kc_yaml_leaf_value and cut init from 16s to 3s
+f566f44 fix: point `bedrock view` at --serve over SSH; honor a forwarded display
 7830785 chore: sync vault and beads export
 1e07acc fix: migrate-from-legacy crashed on every run
 f01e91b fix: point at the project-bedrock repo, not the pre-rename name
@@ -35,9 +40,4 @@ e674e0e fix: scope layout version reads to frontmatter and report stamp failures
 8f885bd feat: record an on-disk layout version separate from the package version
 076a0c7 docs: record the no-path-in-hooks and single-browser-opener decisions
 2540c99 test: make the --serve check proxy-independent and report the server's output
-643d302 fix: spawn the browser launcher instead of waiting on it; honor $BROWSER
-8c79a9c fix: drop the project path from generated hooks; repair update for local vaults
-3dce430 fix: guard the star prompt behind the display check; gitignore the per-machine sync artifact
-77b621e chore: regenerate local integration files from the updated templates
-38750db fix: portable generated configs, non-destructive refresh, per-area memory; bump v0.4.17
 ```

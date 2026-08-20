@@ -11,14 +11,36 @@ import click
 
 from agent_knowledge import __version__
 from agent_knowledge.runtime.paths import get_assets_dir
-from agent_knowledge.runtime.shell import open_in_browser, run_bash_script, run_python_script
+from agent_knowledge.runtime.shell import (
+    is_remote_session,
+    open_in_browser,
+    run_bash_script,
+    run_python_script,
+)
 
 
-def _open_in_browser(target: Path | str) -> None:
-    """Open a local file or URL in the system browser, or print it if there is none."""
-    target = target.as_uri() if isinstance(target, Path) else target
-    if not open_in_browser(target):
-        click.echo(f"no display detected; open it yourself: {target}", err=True)
+def _open_in_browser(target: Path | str, *, serve_hint: str | None = None) -> None:
+    """Open a local file or URL in the system browser, or say how to reach it.
+
+    Over SSH a local file is the one case where printing the path is actively
+    misleading: it names a file on *this* host, so pasting it into a browser on
+    the client opens nothing and reads like a broken page rather than a missing
+    browser. serve_hint is the caller's own serve command, worth naming here
+    because nobody runs `--help` on a command that appeared to succeed; callers
+    with no serve equivalent pass none rather than advertise a command that
+    would build a different site. A URL is unaffected -- it resolves the same
+    from either end.
+    """
+    is_local_file = isinstance(target, Path)
+    uri = target.as_uri() if is_local_file else target
+    if open_in_browser(uri):
+        return
+    if is_local_file and is_remote_session():
+        click.echo(f"no browser in this ssh session; that file is on the remote host: {uri}", err=True)
+        remedy = f" -- run `{serve_hint}` instead and forward the port" if serve_hint else ""
+        click.echo(f"it will not resolve in a browser on your local machine{remedy}.", err=True)
+        return
+    click.echo(f"no display detected; open it yourself: {uri}", err=True)
 
 
 def _add_common_flags(
@@ -760,8 +782,9 @@ def view(project: str, output_dir: str | None, serve: bool, port: int, no_open: 
     The site is generated into Views/site/ by default and opened via file://.
     Use --serve when the browser restricts local files (strict CSP, sandboxed
     profiles) or when working over SSH, where the port can be forwarded.
-    On a headless box or an SSH session the browser is skipped and the path is
-    printed instead; --no-open forces that everywhere.
+    On a headless box the browser is skipped and the path is printed; over
+    plain SSH the message points at --serve instead (with a forwarded display,
+    ssh -X, the browser opens as usual); --no-open skips the browser everywhere.
     """
     from agent_knowledge.runtime.site import generate_site
 
@@ -782,7 +805,12 @@ def view(project: str, output_dir: str | None, serve: bool, port: int, no_open: 
         click.echo(Path(result["index_html"]).as_uri(), err=True)
         return
 
-    _open_in_browser(Path(result["index_html"]))
+    hint = "bedrock view"
+    if project != ".":
+        hint += f" --project {project}"
+    if output_dir:
+        hint += f" --output-dir {output_dir}"
+    _open_in_browser(Path(result["index_html"]), serve_hint=hint + " --serve")
 
 
 def _serve_site(site_dir: Path, index_html: Path, port: int, *, no_open: bool = False) -> None:
