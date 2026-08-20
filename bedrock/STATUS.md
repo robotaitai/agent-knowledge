@@ -8,7 +8,7 @@ local_pointer_path: ./agent-knowledge
 onboarding: complete
 last_bootstrap: 2026-04-08T19:43:34Z
 last_backfill_import: 2026-08-20
-last_project_sync: 2026-08-19T22:10:25Z
+last_project_sync: 2026-08-20T05:43:16Z
 last_compaction: 
 last_validation: 2026-08-09T19:57:21Z
 last_validation_result: warn
@@ -33,7 +33,7 @@ last_system_refresh: 2026-08-09T20:44:13Z
 
 - Last bootstrap: `2026-04-08T19:43:34Z`
 - Last backfill/import: `2026-08-09`
-- Last project sync: `2026-08-19T22:10:25Z`
+- Last project sync: `2026-08-20T05:43:16Z`
 - Last compaction: `not-yet`
 - Last validation: `2026-08-09T19:57:21Z` (`warn`)
 - Last doctor: `2026-08-09T19:57:22Z` (`warn`)

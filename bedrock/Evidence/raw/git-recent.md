@@ -1,7 +1,7 @@
 ---
 note_type: evidence
 source: git-log
-extracted: 2026-08-19T22:10:25Z
+extracted: 2026-08-20T05:43:16Z
 commits: 30
 ---
 
@@ -10,6 +10,8 @@ commits: 30
 Last 30 commits as of 2026-08-20.
 
 ```
+ad37784 chore: sync vault and beads export
+2c7a4d0 fix: strip CRLF in kc_yaml_leaf_value and cut init from 16s to 3s
 7830785 chore: sync vault and beads export
 1e07acc fix: migrate-from-legacy crashed on every run
 f01e91b fix: point at the project-bedrock repo, not the pre-rename name
@@ -38,6 +40,4 @@ e674e0e fix: scope layout version reads to frontmatter and report stamp failures
 3dce430 fix: guard the star prompt behind the display check; gitignore the per-machine sync artifact
 77b621e chore: regenerate local integration files from the updated templates
 38750db fix: portable generated configs, non-destructive refresh, per-area memory; bump v0.4.17
-0b8de26 fix: repair `bedrock view` navigation; harden update path against legacy installs; bump v0.4.16
-5e43bf7 feat: add install.sh caveman installer (uv -> pipx -> pip); document in README
 ```
