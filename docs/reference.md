@@ -165,7 +165,7 @@ Common issues:
 - Claude not picking up memory: check `.claude/settings.json` exists -- run `bedrock refresh-system`
 - Cursor hooks not firing: check `.cursor/hooks.json` exists -- run `bedrock refresh-system`
 - `Invalid value for '--project': Path ... does not exist` in a hook, or a path that stops at the first space: the repo was set up before 0.4.17, when hook commands still carried a path -- run `bedrock refresh-system --project .` once and commit the result (see "Keeping up to date")
-- `bedrock view` opens nothing over SSH: the browser is skipped without a display and the path is printed instead; use `bedrock view --serve` and forward the port
+- `bedrock view` opens nothing over plain SSH: the file lives on the remote host, so the message points at `bedrock view --serve` -- run that and forward the port. With a forwarded display (`ssh -X`) the browser opens as usual
 - Stale index: run `bedrock sync`
 - Large notes: run `bedrock compact`
 - **Wrong binary**: another tool may install a Node.js `agent-knowledge` binary that shadows ours. Check with `which -a bedrock`. Fix: `export PATH="$(python3 -c 'import sysconfig; print(sysconfig.get_path("scripts"))'):$PATH"`

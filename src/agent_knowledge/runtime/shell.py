@@ -128,6 +128,22 @@ def is_remote_session() -> bool:
     return bool(os.environ.get("SSH_CONNECTION") or os.environ.get("SSH_TTY"))
 
 
+def _display_looks_forwarded(display: str) -> bool:
+    """Whether DISPLAY plausibly came from SSH X11 forwarding.
+
+    sshd allocates TCP-style displays ("localhost:10.0") or, with a
+    unix-socket listener, display numbers at X11DisplayOffset (default 10)
+    and up. A console display is ":0"-ish -- inside a remote session that is
+    the machine's own screen leaked through dotfiles or a reattached tmux
+    env, not a display the SSH user can see.
+    """
+    host, _, number = display.rpartition(":")
+    if host and host != "unix":
+        return True
+    number = number.split(".", 1)[0]
+    return number.isdigit() and int(number) >= 10
+
+
 def has_display() -> bool:
     """Whether a GUI browser can plausibly be opened here.
 
@@ -136,13 +152,17 @@ def has_display() -> bool:
     the shell prompt has already returned.
 
     SSH is not headless by definition -- `ssh -X` forwards a real, usable
-    display -- so a remote session is judged by DISPLAY like any other. Only
-    darwin and win32, where a display is assumed rather than advertised in the
-    environment, need the remote case ruled out explicitly: there the launcher
-    would open a browser on a console nobody is sitting at.
+    display -- but a remote session only counts when DISPLAY actually looks
+    forwarded: a leaked console DISPLAY (or WAYLAND_DISPLAY, which ssh cannot
+    forward) would open the browser on a screen nobody is sitting at. darwin
+    and win32 assume a display rather than advertise one in the environment,
+    so there the remote case is ruled out entirely.
     """
     if sys.platform == "darwin" or sys.platform == "win32":
         return not is_remote_session()
+    if is_remote_session():
+        display = os.environ.get("DISPLAY", "")
+        return bool(display) and _display_looks_forwarded(display)
     return bool(os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
 
 
