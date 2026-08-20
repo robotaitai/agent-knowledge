@@ -11,12 +11,14 @@ Build a polished standalone site from your knowledge vault -- no Obsidian requir
 ```bash
 bedrock export-html       # generate
 bedrock view              # generate and open in browser
+bedrock view --serve      # generate and serve on http://127.0.0.1 (Ctrl-C to stop)
 ```
 
 The generated site includes an overview page, branch tree navigation, note detail
 view, evidence view, interactive graph view, and machine-readable `knowledge.json`
 and `graph.json`. It writes to `Views/site/` by default, with legacy
-`Outputs/site/` fallback for older projects. Opens via `file://` with no server needed.
+`Outputs/site/` fallback for older projects. Opens via `file://` with no server needed;
+use `--serve` (optionally with `--port`) when the browser restricts local files.
 
 Memory/ notes are always primary. Evidence and generated view items are clearly marked
 non-canonical.
@@ -84,6 +86,64 @@ It never touches `Memory/`, `Work/`, `Evidence/`, or any curated knowledge.
 
 `bedrock doctor` warns when the project integration is behind the installed version.
 
+### One-time fix for projects set up before 0.4.17
+
+Versions before 0.4.17 wrote the setting-up machine's absolute repo path into
+`.claude/settings.json`, `.cursor/hooks.json`, `.agent-project.yaml`, and
+`bedrock/STATUS.md`, so every hook failed for everyone else who cloned the repo:
+
+```
+Error: Invalid value for '--project': Path '/home/someone/code/proj' does not exist.
+```
+
+0.4.17 generates hook commands with no path at all -- `bedrock sync` rather than
+`bedrock sync --project <dir>` -- and the CLI walks up from wherever it was
+invoked to find the project root. Nothing to hardcode, nothing to quote when the
+path contains a space, and nothing that depends on the shell expanding a
+variable (Windows hooks run under Git Bash or PowerShell, which disagree).
+
+The repair ships via `refresh-system`, which normally runs from the
+`SessionStart` hook -- the very hook that is broken. So run it by hand once per
+repo, then commit:
+
+```bash
+bedrock refresh-system --project .
+git commit -am "fix: portable bedrock integration files"
+```
+
+Project-added hooks, `permissions`, and `env` in `.claude/settings.json` are
+preserved; only bedrock's own hook commands are rewritten.
+
+### Layout versions
+
+`bedrock/STATUS.md` records a `layout_version` -- an integer describing the
+on-disk shape of the vault, separate from `framework_version`. Most releases
+change no layout and leave it alone.
+
+- **Your install is newer than the project:** `refresh-system` applies the
+  pending migrations in order and records the new version. This happens
+  automatically from the `SessionStart` hook.
+- **Your install is older than the project:** both `sync` and `refresh-system`
+  write nothing and tell you to upgrade. Without this, the older teammate would
+  revert the layout on every session and the newer one would restore it,
+  forever. The guard covers both because `SessionStart` runs them together as
+  `bedrock sync && bedrock refresh-system` -- guarding only the second one
+  would leave `sync` free to rewrite the vault first.
+
+A blocked run still exits 0, because it happens in a session hook where a
+non-zero exit would take the whole session down with it -- and where failing
+`sync` would stop `refresh-system` from ever reporting why. `bedrock doctor`
+reports which side of the gap you are on.
+
+Migrations only ever move data; nothing is deleted, so
+`refresh-system --dry-run` is safe to inspect first. A migration that fails
+stops the chain and leaves the version unrecorded, so the next session retries
+from the last good state -- the rest of the refresh still runs, and the failure
+is reported rather than swallowed.
+
+The guard only protects from 0.4.17 onward: an older install has no notion of
+layout versions and will not honour it.
+
 ## Custom knowledge home
 
 ```bash
@@ -104,6 +164,8 @@ Common issues:
 - Onboarding still pending: paste the init prompt into your agent
 - Claude not picking up memory: check `.claude/settings.json` exists -- run `bedrock refresh-system`
 - Cursor hooks not firing: check `.cursor/hooks.json` exists -- run `bedrock refresh-system`
+- `Invalid value for '--project': Path ... does not exist` in a hook, or a path that stops at the first space: the repo was set up before 0.4.17, when hook commands still carried a path -- run `bedrock refresh-system --project .` once and commit the result (see "Keeping up to date")
+- `bedrock view` opens nothing over SSH: the browser is skipped without a display and the path is printed instead; use `bedrock view --serve` and forward the port
 - Stale index: run `bedrock sync`
 - Large notes: run `bedrock compact`
 - **Wrong binary**: another tool may install a Node.js `agent-knowledge` binary that shadows ours. Check with `which -a bedrock`. Fix: `export PATH="$(python3 -c 'import sysconfig; print(sysconfig.get_path("scripts"))'):$PATH"`

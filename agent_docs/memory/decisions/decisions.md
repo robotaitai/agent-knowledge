@@ -1,6 +1,6 @@
 ---
 note_type: decisions-index
-updated: 2026-05-05
+updated: 2026-05-06
 tags:
   - agent-knowledge
   - memory
@@ -107,6 +107,20 @@ Architectural and process decisions for agent-knowledge.
 - **Date**: 2026-05-05
 - **Context**: Users without per-project bedrock setup had no way to get memory context automatically. Each tool has a user-global config dir that all projects inherit.
 - **Decision**: Add `bedrock install-global` that writes conditional rules to `~/.cursor/rules/`, `~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md`, `~/.gemini/GEMINI.md`. Rules are sentinel-guarded (idempotent) and activate only when `./bedrock/STATUS.md` exists in the project.
+- **Status**: Active
+
+## 📝 015 - Emoji headers in Memory branch notes {#015}
+
+- **Date**: 2026-05-06
+- **Context**: Memory notes were plain markdown with no visual hierarchy. Section headers were hard to scan at a glance, especially in the site viewer and Obsidian.
+- **Decision**: Use emojis in section headers of all Memory branch notes (e.g. `## 🔄 Recent Changes`, `## 🔗 See Also`). All agent contracts (AGENTS.md, CLAUDE.md, GEMINI.md, Codex) and `memory-writeback.mdc` now instruct this. No emojis in code, CLI output, or logs.
+- **Status**: Active
+
+## ✅ 016 - Decisions step in every memory-update template {#016}
+
+- **Date**: 2026-05-06
+- **Context**: The `/memory-update` command and all agent contracts only instructed agents to update branch notes. Architectural decisions were silently skipped, causing `decisions.md` to go stale.
+- **Decision**: Every memory-update template and agent contract now has an explicit step: "If any architectural, design, or tooling decisions were made, add them to `decisions.md`."
 - **Status**: Active
 
 ## 🔗 See Also

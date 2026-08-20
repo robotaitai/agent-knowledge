@@ -99,7 +99,6 @@ def install_cursor(repo: Path, *, dry_run: bool = False, force: bool = False) ->
     """Install Cursor hooks and rules integration."""
     assets = get_assets_dir()
     actions = []
-    repo_abs = repo.resolve().as_posix()
 
     # Hooks
     hooks_src = assets / "templates" / "integrations" / "cursor" / "hooks.json"
@@ -110,19 +109,24 @@ def install_cursor(repo: Path, *, dry_run: bool = False, force: bool = False) ->
         actions.append("  [dry-run] would create: .cursor/hooks.json")
     else:
         hooks_dst.parent.mkdir(parents=True, exist_ok=True)
-        content = hooks_src.read_text(encoding="utf-8").replace("<repo-path>", repo_abs)
-        hooks_dst.write_text(content, encoding="utf-8")
+        # Commands use --project . on purpose: hooks run with the project root as
+        # cwd, and a relative path stays valid on every machine that clones the
+        # repo and needs no quoting when the path contains spaces.
+        hooks_dst.write_text(hooks_src.read_text(encoding="utf-8"), encoding="utf-8")
         actions.append("  created: .cursor/hooks.json")
 
-    # Rule
+    # Rule — the bundled template is authoritative (refresh-system installs the
+    # same file); _CURSOR_RULE is only a fallback for broken installs.
     rule_dst = repo / ".cursor" / "rules" / "bedrock.mdc"
+    rule_src = assets / "templates" / "integrations" / "cursor" / "bedrock.mdc"
     if rule_dst.exists() and not force:
         actions.append("  exists: .cursor/rules/bedrock.mdc")
     elif dry_run:
         actions.append("  [dry-run] would create: .cursor/rules/bedrock.mdc")
     else:
         rule_dst.parent.mkdir(parents=True, exist_ok=True)
-        rule_dst.write_text(_CURSOR_RULE, encoding="utf-8")
+        rule = rule_src.read_text(encoding="utf-8") if rule_src.is_file() else _CURSOR_RULE
+        rule_dst.write_text(rule, encoding="utf-8")
         actions.append("  created: .cursor/rules/bedrock.mdc")
 
     # Commands
@@ -173,7 +177,6 @@ def install_claude(repo: Path, *, dry_run: bool = False, force: bool = False) ->
     """Install Claude project-local integration (settings, commands, instructions)."""
     assets = get_assets_dir()
     actions = []
-    repo_abs = repo.resolve().as_posix()
 
     # Settings (hooks)
     settings_src = assets / "templates" / "integrations" / "claude" / "settings.json"
@@ -184,8 +187,8 @@ def install_claude(repo: Path, *, dry_run: bool = False, force: bool = False) ->
         actions.append("  [dry-run] would create: .claude/settings.json")
     else:
         settings_dst.parent.mkdir(parents=True, exist_ok=True)
-        content = settings_src.read_text(encoding="utf-8").replace("<repo-path>", repo_abs)
-        settings_dst.write_text(content, encoding="utf-8")
+        # See install_cursor: relative --project . keeps the tracked config portable.
+        settings_dst.write_text(settings_src.read_text(encoding="utf-8"), encoding="utf-8")
         actions.append("  created: .claude/settings.json")
 
     # Commands

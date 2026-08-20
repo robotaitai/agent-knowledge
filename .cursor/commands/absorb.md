@@ -11,7 +11,7 @@ Steps:
 
 2. For each file, determine what kind of knowledge it contains and route accordingly:
    - Architecture / design notes → find or create `./bedrock/Memory/<topic>.md`
-   - Decisions / ADRs → append structured entries to `./bedrock/Memory/decisions/decisions.md`
+   - Decisions / ADRs → append structured entries to `./bedrock/Memory/decisions.md`
    - Changelog / history entries → append events to `./bedrock/History/events.ndjson`
    - API / component docs → find or create the relevant Memory branch note
    - Mix of the above → split and route each part to the right place
@@ -22,11 +22,12 @@ Steps:
    - Do NOT copy the file verbatim — extract only stable, confirmed facts
    - Skip speculative, transitional, or session-only content
 
-4. If new Memory branches were created, update `./bedrock/Memory/MEMORY.md` with a one-line summary and link
+4. If durable project context changed, update `./bedrock/Memory/PROJECT.md`
+5. If current priorities changed, update `./bedrock/Work/NOW.md`
 
-5. Run in terminal: `bedrock sync --project .`
+6. Run in terminal: `bedrock sync --project .`
 
-6. Summarize:
+7. Summarize:
    - Which files were read
    - Which Memory branches were updated or created
    - Which decisions were added

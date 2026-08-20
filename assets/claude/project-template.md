@@ -36,11 +36,16 @@
 
 ## Shared Memory
 
-Persistent project memory lives at `agent-knowledge/Memory/MEMORY.md`.
-The local `agent-knowledge/` path should point to the real dedicated knowledge folder.
-Read it at the start of each session. Write back after meaningful changes.
+Persistent project memory lives in `bedrock/Memory/`, organized one doc per area:
 
-- If `agent-knowledge/Memory/MEMORY.md` is missing: run `scripts/bootstrap-memory-tree.sh .`
+- `bedrock/Memory/<area>.md` — everything durable about that subsystem (navigation, perception, auth, billing, ...). If work touches an area with no doc yet, create it.
+- `bedrock/Memory/decisions.md` — dated rationale for choices, not the design itself
+- `bedrock/Memory/PROJECT.md` — cross-area overview only; it links to the area docs
+
+Read the areas relevant to the task at the start of each session, and write back
+after meaningful changes.
+
+- If `bedrock/Memory/PROJECT.md` is missing: run `bedrock bootstrap --project .`
 - After any architectural decision: use the `decision-recording` skill
 - After any meaningful state change: follow the `memory-writeback` rule
-- To backfill from git/docs history: run `scripts/import-agent-history.sh .`
+- To backfill from git/docs history: run `bedrock import --project .`

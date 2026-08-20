@@ -33,6 +33,21 @@ Check `./bedrock/STATUS.md`. If `onboarding: pending`:
 - Only write confirmed, stable facts into `Memory/`
 - Do not read the whole vault unless necessary
 
+### One doc per area
+
+Memory is organized per area, one doc per subsystem:
+
+| File | Holds |
+|------|-------|
+| `Memory/<area>.md` | Everything durable about that area (navigation, perception, auth, billing, ...) |
+| `Memory/decisions.md` | Dated rationale for choices, not the design itself |
+| `Memory/PROJECT.md` | Cross-area overview only; links to the area docs |
+
+If work touches an area with no doc yet, create `Memory/<area>.md`. Name areas
+after the project's own functional layers, not its hardware or file layout, so
+cross-cutting subsystems (navigation, control, auth) get a home instead of being
+split between the project overview and the decisions log.
+
 ## Session Start
 
 If you support shell commands, run at session start:
@@ -53,7 +68,7 @@ Do not treat generated Views as canonical truth.
 
 After meaningful work:
 
-1. Update `Memory/` with stable project knowledge
+1. Update the affected `Memory/<area>.md` docs with stable project knowledge, creating any area doc that does not exist yet
 2. Update `Work/NOW.md` if focus, next actions, or blockers changed
 3. Update `Work/open-questions.md`, `Work/risks.md`, or `Work/backlog.md` if needed
 4. Run `bedrock sync --project .`

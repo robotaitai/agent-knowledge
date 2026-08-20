@@ -1,7 +1,7 @@
 ---
 note_type: durable-branch
 area: testing
-updated: 2026-04-30
+updated: 2026-05-06
 tags:
   - agent-knowledge
   - testing
@@ -80,6 +80,7 @@ Test strategy for packaging validation and CLI correctness.
 - 2026-04-23: Added Claude integration tests (total: ~143).
 - 2026-04-28: Added absorb tests (total: 153).
 - 2026-04-30: Fixed all CI failures from v0.4.0 rename: updated ~80 path refs (`agent-knowledge` → `bedrock`), `is_symlink()` → `is_dir()` for local mode, content string checks, STATUS.md timestamp regex. CI now green (151 passing).
+- 2026-05-06: Fixed `test_bundled_captures_readme_exists` — template path updated from `project/agent-knowledge/` to `project/bedrock/` (v0.4.10).
 
 ## ❓ Open Questions
 

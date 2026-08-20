@@ -180,7 +180,19 @@ The project carries **everything it needs**. Claude Code, Cursor, and Codex all 
 ![full](https://img.shields.io/badge/full-2ea44f) &nbsp;Auto-installed on `init` -- hooks fire automatically, slash commands active, `bedrock doctor` validates health. &nbsp;
 ![bridge](https://img.shields.io/badge/bridge_only-lightgrey) &nbsp;`AGENTS.md` installed when `.codex/` detected -- agent loads memory context, no automated hooks.
 
-> CI matrix: ubuntu-latest + macos-latest, Python 3.9 / 3.12 / 3.13. Windows: Git Bash auto-detected; forward-slash paths and UTF-8 subprocess encoding fixed in v0.4.0.
+> CI matrix: ubuntu-latest + macos-latest, Python 3.9 / 3.10 / 3.12 / 3.13. Windows: Git Bash auto-detected; forward-slash paths and UTF-8 subprocess encoding fixed in v0.4.0.
+
+### 👥 Built For More Than One Developer
+
+Generated hook commands carry **no machine-specific paths**:
+
+```json
+"command": "bedrock sync && bedrock refresh-system"
+```
+
+The CLI walks up from wherever it was invoked to find the project root. Nothing to hardcode, nothing that breaks when a path contains a space, and nothing that depends on which shell your agent picked -- on Windows, hooks run under Git Bash or PowerShell, and those two disagree about variable expansion.
+
+Everything machine-specific is either relative or gitignored, so `.claude/settings.json` and `.cursor/hooks.json` are safe to commit and a fresh clone works immediately. Projects set up by an older version repair themselves on the next session -- nobody edits generated files by hand.
 
 <details>
 <summary><b>Claude Code</b> &nbsp;<code>.claude/</code></summary>
@@ -194,7 +206,7 @@ The project carries **everything it needs**. Claude Code, Cursor, and Codex all 
 | `commands/memory-update.md` | `/memory-update` slash command |
 | `commands/system-update.md` | `/system-update` slash command |
 | `commands/absorb.md` | `/absorb <file/folder>` slash command |
-
+    
 </details>
 
 <details>
@@ -255,6 +267,14 @@ bedrock doctor
 
 Reports whether all integration files are installed and current. If anything is stale or missing, `doctor` tells you exactly what to run.
 
+### ⬆️ Upgrades That Can't Go Backwards
+
+`bedrock/STATUS.md` records a `layout_version` describing the on-disk shape of the vault, separate from the package version.
+
+If your install is **newer** than the project, `refresh-system` migrates it forward automatically. If your install is **older**, it writes nothing and tells you to upgrade -- otherwise a teammate on an older version would quietly revert the layout on every session, and the teammate on the newer one would restore it, forever.
+
+A blocked refresh still exits 0, because it runs from a session hook where a hard failure would take the whole session down with it.
+
 ---
 
 ## 🔮 Obsidian-Ready
@@ -281,7 +301,7 @@ Obsidian is optional. Works without it too.
 | `init` | Set up a project -- one command, no arguments |
 | `sync` | Full sync: memory, history, git evidence, index |
 | `ship` | Validate + sync + commit + push |
-| `view` | Build site and open in browser |
+| `view` | Build the site and open it -- prints the path instead when there is no display, `--serve` to forward a port over SSH |
 | `doctor` | Validate setup, integration health, note staleness |
 
 <details>

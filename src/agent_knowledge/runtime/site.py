@@ -1111,6 +1111,7 @@ const GRAPH_DATA = __GRAPH_JSON__;
 
 let _view = 'overview';
 let _notePath = null;
+const memoryRootPath = (DATA.project && DATA.project.memory_root_path) || 'Memory/PROJECT.md';
 
 // ---- Helpers ----
 function esc(s){
@@ -1154,7 +1155,6 @@ function buildSidebar(){
   meta.innerHTML = `<span class="badge badge-profile">${esc(profile)}</span><span class="badge ${onbCls}">${esc(onb)}</span>`;
 
   const tree = document.getElementById('sidebar-tree');
-  const memoryRootPath = DATA.project.memory_root_path||'Memory/PROJECT.md';
   let h = '';
 
   // Memory group

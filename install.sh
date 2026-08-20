@@ -42,6 +42,41 @@ check_python() {
   return 1
 }
 
+# ── purge legacy installs ────────────────────────────────────────────────────
+# The distribution was renamed (agent-knowledge -> agent-knowledge-cli ->
+# project-bedrock). Every version ships the same 'agent_knowledge' package and
+# 'bedrock' script, so a leftover old dist shadows this one and the user keeps
+# running stale code. Remove them across every installer before installing.
+LEGACY_NAMES="agent-knowledge agent-knowledge-cli"
+
+purge_legacy() {
+  local found=0 p
+  if command -v pipx &>/dev/null; then
+    for p in $LEGACY_NAMES; do
+      if pipx list --short 2>/dev/null | grep -q "^$p "; then
+        warn "Removing legacy pipx install: $p"; pipx uninstall "$p" >/dev/null 2>&1 || true; found=1
+      fi
+    done
+  fi
+  if command -v uv &>/dev/null; then
+    for p in $LEGACY_NAMES; do
+      if uv tool list 2>/dev/null | grep -q "^$p "; then
+        warn "Removing legacy uv tool: $p"; uv tool uninstall "$p" >/dev/null 2>&1 || true; found=1
+      fi
+    done
+  fi
+  if command -v pip3 &>/dev/null || command -v pip &>/dev/null; then
+    local PIP; PIP=$(command -v pip3 || command -v pip)
+    for p in $LEGACY_NAMES; do
+      if "$PIP" show "$p" &>/dev/null; then
+        warn "Removing legacy pip install: $p"; "$PIP" uninstall -y "$p" >/dev/null 2>&1 || true; found=1
+      fi
+    done
+  fi
+  [ "$found" -eq 1 ] && info "Cleaned up legacy install(s)."
+  return 0
+}
+
 # ── install ──────────────────────────────────────────────────────────────────
 section "project-bedrock installer"
 echo "  installs the 'bedrock' CLI for AI agent project memory"
@@ -49,6 +84,8 @@ echo ""
 
 PY=$(check_python) || error "Python ${MIN_PYTHON}+ is required. Install from https://python.org"
 info "Python: $($PY --version)"
+
+purge_legacy
 
 if command -v uv &>/dev/null; then
   info "Using uv (isolated install)"

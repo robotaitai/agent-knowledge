@@ -172,6 +172,7 @@ kc_yaml_leaf_value() {
     awk -v key="$key" '
         $0 ~ "^[[:space:]]*" key ":[[:space:]]*" {
             value = $0
+            sub(/\r$/, "", value)
             sub("^[[:space:]]*" key ":[[:space:]]*", "", value)
             gsub(/^["'"'"']|["'"'"']$/, "", value)
             print value
@@ -347,6 +348,7 @@ kc_load_project_context() {
     local pointer_value=""
     local real_value=""
     local memory_root_value=""
+    local pattern=""
 
     TARGET_PROJECT="$(cd "$project_dir" 2>/dev/null && pwd)"
     [ -n "$TARGET_PROJECT" ] || kc_fail "Unable to resolve project dir: $project_dir"
@@ -432,6 +434,8 @@ kc_load_project_context() {
                     continue
                     ;;
             esac
+            kc_normalize_relative_path pattern "$pattern"
+            [ -n "$pattern" ] || continue
             KC_IGNORE_PATTERNS+=("$pattern")
         done < "$IGNORE_FILE"
     fi
@@ -471,28 +475,29 @@ kc_rel_knowledge_path() {
     esac
 }
 
+# Sets the caller-named variable ($1) instead of printing: this runs tens
+# of thousands of times per init, and a $(...) caller forks a subshell for
+# what is pure parameter expansion (bash 3.2 has no namerefs).
 kc_normalize_relative_path() {
-    local path="${1:-}"
-    path="${path#./}"
-    path="${path#/}"
-    printf '%s\n' "$path"
+    local kc_nrp_path="${2:-}"
+    kc_nrp_path="${kc_nrp_path#./}"
+    kc_nrp_path="${kc_nrp_path#/}"
+    printf -v "$1" '%s' "$kc_nrp_path"
 }
 
+# KC_IGNORE_PATTERNS entries are normalized once at load time.
 kc_path_is_ignored() {
     local path=""
     local pattern=""
-    local normalized_pattern=""
     local base=""
 
-    path="$(kc_normalize_relative_path "${1:-}")"
+    kc_normalize_relative_path path "${1:-}"
     [ -n "$path" ] || return 1
 
     for pattern in "${KC_IGNORE_PATTERNS[@]+"${KC_IGNORE_PATTERNS[@]}"}"; do
-        normalized_pattern="$(kc_normalize_relative_path "$pattern")"
-        [ -n "$normalized_pattern" ] || continue
-        case "$normalized_pattern" in
+        case "$pattern" in
             */)
-                base="${normalized_pattern%/}"
+                base="${pattern%/}"
                 case "$path" in
                     $base|$base/*)
                         return 0
@@ -501,7 +506,7 @@ kc_path_is_ignored() {
                 ;;
             *)
                 case "$path" in
-                    $normalized_pattern|$normalized_pattern/*)
+                    $pattern|$pattern/*)
                         return 0
                         ;;
                 esac
@@ -517,7 +522,7 @@ kc_filter_relative_lines() {
 
     while IFS= read -r line; do
         [ -n "$line" ] || continue
-        normalized="$(kc_normalize_relative_path "$line")"
+        kc_normalize_relative_path normalized "$line"
         if kc_path_is_ignored "$normalized"; then
             continue
         fi
@@ -570,12 +575,14 @@ kc_signature_from_paths() {
 kc_signature_from_project_relative_lines() {
     local relpaths_text="${1:-}"
     local line=""
+    local rel=""
     local abs=""
     local text=""
 
     while IFS= read -r line; do
         [ -n "$line" ] || continue
-        abs="$TARGET_PROJECT/$(kc_normalize_relative_path "$line")"
+        kc_normalize_relative_path rel "$line"
+        abs="$TARGET_PROJECT/$rel"
         if [ -e "$abs" ]; then
             text="${text}$(kc_stat_signature_line "$abs" "$line")"$'\n'
         else
@@ -689,7 +696,10 @@ kc_require_knowledge_pointer() {
     pointer_resolved="$(kc_pointer_resolved_path || true)"
     [ -n "$pointer_resolved" ] || kc_fail "Unable to resolve local knowledge pointer: $KNOWLEDGE_POINTER_PATH"
     [ "$pointer_resolved" = "$KNOWLEDGE_REAL_DIR" ] || kc_fail "Local knowledge pointer must resolve to the external knowledge folder: $KNOWLEDGE_REAL_DIR"
-    if [ ! -L "$KNOWLEDGE_POINTER_PATH" ] && ! kc_is_windows_like; then
+    # Only an external vault is reached through a symlink. In local mode -- the
+    # default -- ./bedrock is a real directory in the repo, so requiring a
+    # symlink there fails every command that validates the pointer.
+    if [ "${VAULT_MODE:-external}" != "local" ] && [ ! -L "$KNOWLEDGE_POINTER_PATH" ] && ! kc_is_windows_like; then
         kc_fail "Local knowledge handle must be a symlink to the external knowledge folder, not a repo-local directory: $KNOWLEDGE_POINTER_PATH"
     fi
 }
@@ -768,7 +778,13 @@ kc_status_load() {
     STATUS_PROJECT="$PROJECT_NAME"
     STATUS_PROFILE="$PROJECT_PROFILE"
     STATUS_ONTOLOGY_MODEL="2"
-    STATUS_REAL_PATH="$KNOWLEDGE_REAL_DIR"
+    # Local vaults always live at <repo>/bedrock -- record it relatively so the
+    # tracked STATUS.md stays valid on every machine that clones the repo.
+    if [ "${VAULT_MODE:-external}" = "local" ]; then
+        STATUS_REAL_PATH="./bedrock"
+    else
+        STATUS_REAL_PATH="$KNOWLEDGE_REAL_DIR"
+    fi
     STATUS_POINTER_PATH="$POINTER_DISPLAY"
     STATUS_LAST_BOOTSTRAP=""
     STATUS_LAST_IMPORT=""
@@ -790,6 +806,13 @@ kc_status_load() {
     STATUS_PROFILE="$(kc_yaml_leaf_value "$STATUS_FILE" "profile_hint" || kc_yaml_leaf_value "$STATUS_FILE" "profile" || printf '%s' "$STATUS_PROFILE")"
     STATUS_ONTOLOGY_MODEL="$(kc_yaml_leaf_value "$STATUS_FILE" "ontology_model" || printf '2')"
     STATUS_REAL_PATH="$(kc_yaml_leaf_value "$STATUS_FILE" "real_knowledge_path" || printf '%s' "$STATUS_REAL_PATH")"
+    # Heal absolute paths written by an older version or another machine.
+    if [ "${VAULT_MODE:-external}" = "local" ]; then
+        case "$STATUS_REAL_PATH" in
+            .*) ;;
+            *) STATUS_REAL_PATH="./bedrock" ;;
+        esac
+    fi
     STATUS_POINTER_PATH="$(kc_yaml_leaf_value "$STATUS_FILE" "local_pointer_path" || printf '%s' "$STATUS_POINTER_PATH")"
     STATUS_ONBOARDING="$(kc_yaml_leaf_value "$STATUS_FILE" "onboarding" || printf 'pending')"
     STATUS_LAST_BOOTSTRAP="$(kc_yaml_leaf_value "$STATUS_FILE" "last_bootstrap" || true)"
@@ -809,11 +832,57 @@ kc_status_load() {
     )"
 }
 
+# The Python layer stamps keys of its own into this frontmatter
+# (framework_version, last_system_refresh, layout_version). kc_status_write
+# rebuilds the block from a fixed field list, so anything it does not know about
+# has to be carried through verbatim or the two layers erase each other's work.
+kc_status_extra_frontmatter() {
+    [ -f "$STATUS_FILE" ] || return 0
+
+    awk '
+        BEGIN {
+            managed_keys = "note_type project profile profile_hint ontology_model real_knowledge_path"
+            managed_keys = managed_keys " local_pointer_path onboarding last_bootstrap last_backfill_import"
+            managed_keys = managed_keys " last_project_sync last_compaction last_validation"
+            managed_keys = managed_keys " last_validation_result last_doctor last_doctor_result"
+            split(managed_keys, managed, " ")
+            for (i in managed) known[managed[i]] = 1
+            keep = 0
+        }
+        {
+            # Git for Windows checks this file out with CRLF, and the rest of
+            # this function writes LF, so drop the terminator on both the match
+            # and the copy we re-emit. Everything else in the line is untouched.
+            line = $0
+            sub(/\r$/, "", line)
+        }
+        NR == 1 {
+            # A UTF-8 BOM sits in front of the opening delimiter. Stripping any
+            # leading non-dash bytes removes it whatever the locale decodes it as.
+            sub(/^[^-]+/, "", line)
+            if (line != "---") exit
+            next
+        }
+        line == "---" { exit }
+        {
+            if (match(line, /^[A-Za-z_][A-Za-z0-9_.-]*:/)) {
+                key = substr(line, 1, RLENGTH - 1)
+                keep = (!(key in known) && !(key in seen))
+                seen[key] = 1
+            }
+            # Non-key lines belong to whichever key preceded them.
+            if (keep) print line
+        }
+    ' "$STATUS_FILE"
+}
+
 kc_status_write() {
     local tmp_file
     local warnings_text="${1:-$STATUS_WARNING_LINES}"
     local warning=""
+    local extra_frontmatter
 
+    extra_frontmatter="$(kc_status_extra_frontmatter)"
     tmp_file="$(mktemp)"
     {
         printf '%s\n' '---'
@@ -832,6 +901,9 @@ kc_status_write() {
         printf 'last_validation_result: %s\n' "$STATUS_LAST_VALIDATION_RESULT"
         printf 'last_doctor: %s\n' "$STATUS_LAST_DOCTOR"
         printf 'last_doctor_result: %s\n' "$STATUS_LAST_DOCTOR_RESULT"
+        if [ -n "$extra_frontmatter" ]; then
+            printf '%s\n' "$extra_frontmatter"
+        fi
         printf '%s\n\n' '---'
         printf '# Knowledge Status: %s\n\n' "$STATUS_PROJECT"
         printf '## Current State\n\n'

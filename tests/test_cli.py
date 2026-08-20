@@ -6,6 +6,7 @@ import json
 import re
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -462,6 +463,66 @@ def test_search_prefers_memory(tmp_path: Path):
 
 
 # -- viewer / export-html tests -------------------------------------------- #
+
+
+def test_view_serve_serves_site_over_http(tmp_path: Path):
+    """view --serve must serve index.html and its data files over 127.0.0.1."""
+    import http.client
+    import os
+    import socket
+    import time
+
+    repo = _init_repo(tmp_path, "view-serve")
+    kh = tmp_path / "kh"
+    _run("init", "--repo", str(repo), "--knowledge-home", str(kh))
+    _run("sync", "--project", str(repo))
+
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        port = s.getsockname()[1]
+
+    env = {**os.environ, "BROWSER": "echo"}  # keep the test from opening a real browser
+    proc = subprocess.Popen(
+        [*BIN, "view", "--project", str(repo), "--serve", "--port", str(port)],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        env=env,
+    )
+
+    def fetch(name):
+        # http.client rather than urllib: urllib resolves system proxy settings,
+        # and on macOS that can route a 127.0.0.1 request away from the server.
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        try:
+            conn.request("GET", f"/{name}")
+            return conn.getresponse().status
+        finally:
+            conn.close()
+
+    try:
+        codes = {}
+        deadline = time.time() + 60
+        while time.time() < deadline:
+            try:
+                for name in ("index.html", "data/knowledge.json"):
+                    codes[name] = fetch(name)
+                break
+            except OSError:
+                assert proc.poll() is None, f"server exited: {proc.communicate()[1]}"
+                time.sleep(0.5)
+
+        if codes.get("index.html") != 200:
+            proc.terminate()
+            out, err = proc.communicate(timeout=10)
+            raise AssertionError(
+                f"index.html was not served over HTTP (codes={codes})\n"
+                f"--- server stdout ---\n{out}\n--- server stderr ---\n{err}"
+            )
+        assert codes.get("data/knowledge.json") == 200, "site data must be served over HTTP"
+    finally:
+        proc.terminate()
+        proc.wait(timeout=10)
 
 
 def test_export_html_creates_site(tmp_path: Path):
@@ -976,6 +1037,11 @@ def test_clean_import_local_html(tmp_path: Path):
     kh = tmp_path / "kh"
     _run("init", "--repo", str(repo), "--knowledge-home", str(kh))
 
+    # init writes its own evidence here, so identify the imported note by what
+    # this command adds rather than by picking the first non-README file.
+    imports_dir = repo / "bedrock" / "Evidence" / "imports"
+    before = {f.name for f in imports_dir.glob("*.md")}
+
     r = _run(
         "clean-import",
         str(html_file),
@@ -983,12 +1049,10 @@ def test_clean_import_local_html(tmp_path: Path):
     )
     assert r.returncode == 0, f"clean-import failed: {r.stderr}"
 
-    imports_dir = repo / "bedrock" / "Evidence" / "imports"
-    # Exclude README.md created by bootstrap
-    md_files = [f for f in imports_dir.glob("*.md") if f.name != "README.md"]
-    assert len(md_files) >= 1, "clean-import should produce a .md file (besides README.md)"
+    added = [f for f in imports_dir.glob("*.md") if f.name not in before]
+    assert len(added) == 1, f"clean-import should produce exactly one .md file, got {added}"
 
-    content = md_files[0].read_text()
+    content = added[0].read_text()
     assert "note_type: evidence" in content
     assert "canonical: false" in content
     assert "Main Content" in content or "useful text" in content.lower()
@@ -1021,13 +1085,16 @@ def test_clean_import_dry_run(tmp_path: Path):
     kh = tmp_path / "kh"
     _run("init", "--repo", str(repo), "--knowledge-home", str(kh))
 
+    # Compare against what init already imported rather than assuming the
+    # directory is empty -- init writes its own evidence there.
+    imports_dir = repo / "bedrock" / "Evidence" / "imports"
+    before = {f.name for f in imports_dir.glob("*.md")}
+
     r = _run("clean-import", str(html_file), "--project", str(repo), "--dry-run")
     assert r.returncode == 0
 
-    imports_dir = repo / "bedrock" / "Evidence" / "imports"
-    # dry-run must not create any imported files (README.md from bootstrap is ok)
-    non_readme = [f for f in imports_dir.glob("*.md") if f.name != "README.md"]
-    assert not non_readme, "dry-run must not create any import files"
+    after = {f.name for f in imports_dir.glob("*.md")}
+    assert after == before, f"dry-run must not create any import files: {after - before}"
 
 
 def test_clean_import_json_mode(tmp_path: Path):
@@ -1705,9 +1772,15 @@ def test_claude_settings_hooks_reference_installed_cli(tmp_path: Path):
     assert "bash " not in content
 
 
-def test_claude_settings_hooks_contain_repo_path(tmp_path: Path):
-    """Hook commands must include the --project <repo-path> for the specific repo."""
-    repo = _init_repo(tmp_path, "claude-repo-path")
+def test_claude_settings_hooks_pass_no_path_at_all(tmp_path: Path):
+    """Hook commands must carry no path argument.
+
+    A path in the command has to be correct on every machine, survive spaces,
+    and expand in whatever shell the agent picked -- Git Bash or PowerShell on
+    Windows. Passing none and letting the CLI find the project root sidesteps
+    all three.
+    """
+    repo = _init_repo(tmp_path, "claude repo path")  # space: must not need quoting
     kh = tmp_path / "kh"
     _run("init", "--repo", str(repo), "--knowledge-home", str(kh))
 
@@ -1717,7 +1790,394 @@ def test_claude_settings_hooks_contain_repo_path(tmp_path: Path):
         for entry in hook_list:
             for hook in entry.get("hooks", []):
                 cmd = hook.get("command", "")
-                assert repo_abs in cmd, f"Hook for {event} must contain repo path"
+                assert "--project" not in cmd, f"Hook for {event} must not pass a project path"
+                assert "$" not in cmd, f"Hook for {event} must not depend on shell variable expansion"
+                assert repo_abs not in cmd, f"Hook for {event} must not hardcode the repo path"
+
+
+def test_cursor_hooks_pass_no_path_at_all(tmp_path: Path):
+    """Cursor hook commands must carry no path argument either."""
+    repo = _init_repo(tmp_path, "cursor repo path")  # space: must not need quoting
+    kh = tmp_path / "kh"
+    _run("init", "--repo", str(repo), "--knowledge-home", str(kh))
+
+    data = json.loads((repo / ".cursor" / "hooks.json").read_text())
+    repo_abs = str(repo.resolve())
+    for hook in data["hooks"]:
+        cmd = hook["command"]
+        assert "--project" not in cmd, f"{hook['name']} must not pass a project path"
+        assert "$" not in cmd, f"{hook['name']} must not depend on shell variable expansion"
+        assert repo_abs not in cmd, f"{hook['name']} must not hardcode the repo path"
+
+
+def test_sync_run_from_a_subdirectory_finds_the_project(tmp_path: Path):
+    """Hooks run in whatever cwd the agent was in, so a bare command must walk up."""
+    repo = _init_repo(tmp_path, "subdir-sync")
+    kh = tmp_path / "kh"
+    _run("init", "--repo", str(repo), "--knowledge-home", str(kh))
+
+    nested = repo / "src" / "deep"
+    nested.mkdir(parents=True)
+
+    r = _run("sync", cwd=str(nested))
+    assert r.returncode == 0, f"sync from a subdirectory must find the project: {r.stderr}"
+    assert not (nested / "bedrock").exists(), "sync must not scaffold a second vault beside the agent's cwd"
+    assert "vault not found" not in r.stderr, f"sync silently skipped the vault: {r.stderr}"
+
+
+def test_scaffolded_project_overview_indexes_area_docs(tmp_path: Path):
+    """PROJECT.md must carry an Areas index so per-area docs have a visible home.
+
+    Without a place to list them, cross-cutting subsystems end up scattered
+    between the overview and the decisions log.
+    """
+    repo = _init_repo(tmp_path, "areas-index")
+    kh = tmp_path / "kh"
+    _run("init", "--repo", str(repo), "--knowledge-home", str(kh))
+
+    text = (repo / "bedrock" / "Memory" / "PROJECT.md").read_text()
+    assert "## Areas" in text, "PROJECT.md must have an Areas section"
+    assert "Memory/<area>.md" in text, "the Areas section must name the per-area doc convention"
+
+
+def test_update_works_in_a_local_vault(tmp_path: Path):
+    """A local vault is a real directory, so update must not demand a symlink.
+
+    The Cursor post-write hook runs `bedrock update`, so this fails on every
+    write in every default-mode project.
+    """
+    repo = _init_repo(tmp_path, "local-update")
+    kh = tmp_path / "kh"
+    _run("init", "--repo", str(repo), "--knowledge-home", str(kh))
+
+    r = _run("update", "--project", str(repo))
+    assert "must be a symlink" not in r.stderr, "local vaults are directories, not symlinks"
+    assert r.returncode == 0, f"update must work in a local vault: {r.stderr}"
+
+
+def test_update_summary_file_lands_in_the_project_from_a_subdirectory(tmp_path: Path):
+    """A relative --summary-file must resolve against the project, not the agent's cwd."""
+    repo = _init_repo(tmp_path, "subdir-summary")
+    kh = tmp_path / "kh"
+    _run("init", "--repo", str(repo), "--knowledge-home", str(kh))
+
+    nested = repo / "src" / "deep"
+    nested.mkdir(parents=True)
+
+    r = _run("update", "--summary-file", "./.cursor/knowledge-sync.last.json", cwd=str(nested))
+    assert r.returncode == 0, f"update from a subdirectory failed: {r.stderr}"
+    assert (repo / ".cursor" / "knowledge-sync.last.json").is_file()
+    assert not (nested / ".cursor").exists(), "summary must not land beside the agent's cwd"
+
+
+def test_refresh_system_preserves_foreign_claude_hooks(tmp_path: Path):
+    """refresh-system must refresh bedrock hooks without dropping project-added ones."""
+    repo = _init_repo(tmp_path, "claude-foreign-hooks")
+    kh = tmp_path / "kh"
+    _run("init", "--repo", str(repo), "--knowledge-home", str(kh))
+
+    settings = repo / ".claude" / "settings.json"
+    data = json.loads(settings.read_text())
+    # A hook the project added itself, plus a stale bedrock hook with an absolute path.
+    data["hooks"]["SessionStart"].append(
+        {"matcher": "", "hooks": [{"type": "command", "command": "bd prime"}]}
+    )
+    data["hooks"]["Stop"] = [
+        {"matcher": "", "hooks": [{"type": "command", "command": f"bedrock sync --project {repo}"}]}
+    ]
+    data["permissions"] = {"allow": ["Bash(ls:*)"]}
+    settings.write_text(json.dumps(data, indent=2))
+
+    r = _run("refresh-system", "--project", str(repo))
+    assert r.returncode == 0, f"refresh-system failed: {r.stderr}"
+
+    after = json.loads(settings.read_text())
+    commands = [
+        h.get("command", "")
+        for groups in after["hooks"].values()
+        for g in groups
+        for h in g.get("hooks", [])
+    ]
+    assert "bd prime" in commands, "project-added hook must survive refresh-system"
+    assert str(repo) not in " ".join(commands), "stale absolute path must be replaced"
+    assert after.get("permissions") == {"allow": ["Bash(ls:*)"]}, "non-hook settings must survive"
+
+
+def test_refresh_system_localizes_real_path(tmp_path: Path):
+    """refresh-system must rewrite an absolute real_path to ./bedrock for local vaults."""
+    repo = _init_repo(tmp_path, "local-real-path")
+    kh = tmp_path / "kh"
+    _run("init", "--repo", str(repo), "--knowledge-home", str(kh))
+
+    project_yaml = repo / ".agent-project.yaml"
+    text = project_yaml.read_text()
+    assert "vault_mode: local" in text
+    project_yaml.write_text(
+        re.sub(r"real_path:\s*\S+", f"real_path: {tmp_path / 'other-machine' / 'bedrock'}", text)
+    )
+
+    r = _run("refresh-system", "--project", str(repo))
+    assert r.returncode == 0, f"refresh-system failed: {r.stderr}"
+    assert "real_path: ./bedrock" in project_yaml.read_text()
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "/home/other/code/proj/bedrock",
+        "/Users/dor thalamus/Documents/New project/bedrock",  # the #9 path shape
+        '"/home/other/code/proj/bedrock"',
+    ],
+)
+def test_localize_real_path_handles_every_absolute_shape(value: str):
+    """Absolute real_path values must localize regardless of spaces or quoting."""
+    from agent_knowledge.runtime.refresh import _localize_real_path
+
+    text = f"knowledge:\n  vault_mode: local\n  real_path: {value}\n  ignore_file: ./x\n"
+    updated, localized = _localize_real_path(text)
+    assert localized, f"{value!r} must be recognized as absolute"
+    assert "real_path: ./bedrock" in updated
+    assert "ignore_file: ./x" in updated
+
+
+def test_localize_real_path_leaves_external_vaults_alone():
+    """External vaults legitimately point outside the repo and must not be rewritten."""
+    from agent_knowledge.runtime.refresh import _localize_real_path
+
+    text = "knowledge:\n  vault_mode: external\n  real_path: /home/me/agent-os/projects/x\n"
+    updated, localized = _localize_real_path(text)
+    assert not localized
+    assert updated == text
+
+
+def test_localize_real_path_is_idempotent():
+    """An already-relative real_path must not be rewritten again."""
+    from agent_knowledge.runtime.refresh import _localize_real_path
+
+    text = "knowledge:\n  vault_mode: local\n  real_path: ./bedrock\n"
+    assert _localize_real_path(text) == (text, False)
+
+
+def test_merge_preserves_commands_chained_onto_bedrock_hooks():
+    """A project that extended the bedrock hook must keep its half of the command."""
+    from agent_knowledge.runtime.refresh import _merge_claude_hooks
+
+    template = {"hooks": {"Stop": [{"matcher": "", "hooks": [{"type": "command", "command": "bedrock sync --project ."}]}]}}
+    current = {
+        "hooks": {
+            "Stop": [
+                {
+                    "matcher": "",
+                    "hooks": [{"type": "command", "command": "bedrock sync --project . && npm run notify"}],
+                }
+            ]
+        }
+    }
+    commands = [
+        h["command"] for g in _merge_claude_hooks(template, current)["hooks"]["Stop"] for h in g["hooks"]
+    ]
+    assert "bedrock sync --project . && npm run notify" in commands, "chained project command must survive"
+
+
+@pytest.mark.parametrize(
+    "stale",
+    [
+        "bedrock sync --project /home/other/code/proj",
+        "bedrock sync --project '/home/other/code/proj'",
+        "agent-knowledge sync --project /home/other/code/proj",
+        "bedrock sync --project .",
+    ],
+)
+def test_merge_replaces_every_generated_command_shape(stale: str):
+    """Commands bedrock itself generated (current or historical) must be replaced."""
+    from agent_knowledge.runtime.refresh import _merge_claude_hooks
+
+    template = {"hooks": {"Stop": [{"matcher": "", "hooks": [{"type": "command", "command": "bedrock sync --project ."}]}]}}
+    current = {"hooks": {"Stop": [{"matcher": "", "hooks": [{"type": "command", "command": stale}]}]}}
+    commands = [
+        h["command"] for g in _merge_claude_hooks(template, current)["hooks"]["Stop"] for h in g["hooks"]
+    ]
+    assert commands == ["bedrock sync --project ."], f"stale command not replaced: {stale}"
+
+
+def test_view_skips_browser_without_a_display(tmp_path: Path):
+    """view must print the path instead of failing when there is no display (SSH/headless)."""
+    import os
+
+    repo = _init_repo(tmp_path, "headless-view")
+    kh = tmp_path / "kh"
+    _run("init", "--repo", str(repo), "--knowledge-home", str(kh))
+
+    env = {k: v for k, v in os.environ.items() if k not in ("DISPLAY", "WAYLAND_DISPLAY")}
+    env["SSH_CONNECTION"] = "10.0.0.1 22 10.0.0.2 22"
+    r = subprocess.run(
+        [*BIN, "view", "--project", str(repo)],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        env=env,
+    )
+    assert r.returncode == 0, f"view must succeed headless: {r.stderr}"
+    assert "index.html" in r.stderr, "the path to open must be printed when the browser is skipped"
+
+
+def test_view_no_open_flag(tmp_path: Path):
+    """--no-open must generate the site without launching a browser."""
+    repo = _init_repo(tmp_path, "view-no-open")
+    kh = tmp_path / "kh"
+    _run("init", "--repo", str(repo), "--knowledge-home", str(kh))
+
+    r = _run("view", "--project", str(repo), "--no-open")
+    assert r.returncode == 0, f"view --no-open failed: {r.stderr}"
+    assert (repo / "bedrock" / "Views" / "site" / "index.html").is_file()
+
+
+def test_open_in_browser_does_not_wait_for_the_launcher(monkeypatch):
+    """The launcher must be spawned, not waited on.
+
+    On a GUI-less macOS box `open` can block for a long time. Waiting for it
+    stalls `bedrock view --serve` before it ever binds its port.
+    """
+    from agent_knowledge.runtime import shell
+
+    monkeypatch.setattr(shell, "has_display", lambda: True)
+    monkeypatch.setattr(
+        shell.subprocess, "run",
+        lambda *a, **k: pytest.fail("the browser launcher must not be waited on"),
+    )
+    spawned = []
+    monkeypatch.setattr(shell.subprocess, "Popen", lambda *a, **k: spawned.append((a, k)))
+
+    assert shell.open_in_browser("http://127.0.0.1:1/index.html")
+    assert spawned, "launcher must still be spawned when a display exists"
+
+
+def test_open_in_browser_honors_the_browser_env_var(monkeypatch):
+    """$BROWSER must win over the platform launcher, as every other tool honors it."""
+    from agent_knowledge.runtime import shell
+
+    monkeypatch.setattr(shell, "has_display", lambda: True)
+    monkeypatch.setenv("BROWSER", "my-browser")
+    spawned = []
+    monkeypatch.setattr(shell.subprocess, "Popen", lambda *a, **k: spawned.append((a, k)))
+
+    assert shell.open_in_browser("http://127.0.0.1:1/index.html")
+    assert spawned[0][0][0] == ["my-browser", "http://127.0.0.1:1/index.html"]
+
+
+def test_star_prompt_does_not_launch_a_browser_without_a_display(monkeypatch, tmp_path: Path):
+    """The one-time star prompt must not spawn a GUI browser on a headless/SSH box.
+
+    A failed launcher writes its errors after the shell prompt has returned and
+    scribbles over the next prompt, which is the whole point of the display guard.
+    """
+    import io
+    import webbrowser
+
+    from agent_knowledge import cli
+
+    opened: list[str] = []
+    monkeypatch.setattr(webbrowser, "open", lambda url, *a, **k: opened.append(url))
+    monkeypatch.setattr(cli, "_STAR_MARKER", tmp_path / "starred")
+    monkeypatch.setattr(cli.click, "confirm", lambda *a, **k: True)
+    monkeypatch.setenv("SSH_CONNECTION", "10.0.0.1 22 10.0.0.2 22")
+
+    class _Tty(io.StringIO):
+        def isatty(self) -> bool:
+            return True
+
+    monkeypatch.setattr(cli.sys, "stderr", _Tty())
+
+    cli._maybe_star()
+
+    assert opened == [], "the star prompt must go through the display-guarded opener"
+
+
+def test_star_prompt_opens_the_repo_when_a_display_exists(monkeypatch, tmp_path: Path):
+    """With a display the prompt must still open the repo page."""
+    import io
+
+    from agent_knowledge import cli
+    from agent_knowledge.runtime import shell
+
+    launched: list[tuple] = []
+    monkeypatch.setattr(shell, "has_display", lambda: True)
+    monkeypatch.setattr(shell.subprocess, "Popen", lambda *a, **k: launched.append(a))
+    monkeypatch.setattr(shell.os, "startfile", lambda target: launched.append((target,)), raising=False)
+    monkeypatch.setattr(cli, "_STAR_MARKER", tmp_path / "starred")
+    monkeypatch.setattr(cli.click, "confirm", lambda *a, **k: True)
+
+    class _Tty(io.StringIO):
+        def isatty(self) -> bool:
+            return True
+
+    monkeypatch.setattr(cli.sys, "stderr", _Tty())
+
+    cli._maybe_star()
+
+    assert any(cli._REPO_URL in str(call) for call in launched), "repo page must open when a display exists"
+
+
+def test_init_gitignores_the_per_machine_sync_artifact(tmp_path: Path):
+    """.cursor/knowledge-sync.last.json records an absolute project path per machine.
+
+    Sharing it makes the repo hostile to a second developer, so init must exclude it.
+    """
+    repo = _init_repo(tmp_path, "gitignore-artifact")
+    kh = tmp_path / "kh"
+    _run("init", "--repo", str(repo), "--knowledge-home", str(kh))
+
+    assert ".cursor/knowledge-sync.last.json" in (repo / ".gitignore").read_text()
+
+
+def test_refresh_system_adds_gitignore_patterns_an_older_connect_missed(tmp_path: Path):
+    """A project connected by an older bedrock must pick up newly added patterns.
+
+    refresh-system runs every session, so it is the only place an existing
+    checkout can self-heal.
+    """
+    repo = _init_repo(tmp_path, "gitignore-selfheal")
+    kh = tmp_path / "kh"
+    _run("init", "--repo", str(repo), "--knowledge-home", str(kh))
+
+    gitignore = repo / ".gitignore"
+    gitignore.write_text(
+        "my-own-thing/\n\n"
+        "# bedrock: noisy auto-generated content excluded from git\n"
+        "bedrock/Evidence/raw/\n"
+        "bedrock/Views/site/\n"
+    )
+
+    r = _run("refresh-system", "--project", str(repo))
+    assert r.returncode == 0, f"refresh-system failed: {r.stderr}"
+
+    text = gitignore.read_text()
+    assert ".cursor/knowledge-sync.last.json" in text, "missing pattern must be added"
+    assert "my-own-thing/" in text, "project's own patterns must survive"
+    assert text.count("bedrock/Evidence/raw/") == 1, "existing patterns must not be duplicated"
+
+
+def test_refresh_system_leaves_a_complete_gitignore_alone(tmp_path: Path):
+    """Refreshing twice must not keep rewriting .gitignore."""
+    repo = _init_repo(tmp_path, "gitignore-idempotent")
+    kh = tmp_path / "kh"
+    _run("init", "--repo", str(repo), "--knowledge-home", str(kh))
+
+    _run("refresh-system", "--project", str(repo))
+    first = (repo / ".gitignore").read_text()
+    _run("refresh-system", "--project", str(repo))
+    assert (repo / ".gitignore").read_text() == first
+
+
+def test_init_keeps_shared_integration_files_tracked(tmp_path: Path):
+    """Hook configs are portable now, so they stay shareable — only artifacts are ignored."""
+    repo = _init_repo(tmp_path, "gitignore-shared")
+    kh = tmp_path / "kh"
+    _run("init", "--repo", str(repo), "--knowledge-home", str(kh))
+
+    text = (repo / ".gitignore").read_text()
+    assert ".claude/settings.json" not in text
+    assert ".cursor/hooks.json" not in text
 
 
 def test_init_installs_claude_commands(tmp_path: Path):
@@ -2079,3 +2539,347 @@ def test_absorb_skips_vault_files(tmp_path: Path):
     if imports_dir.exists():
         files = [f.name for f in imports_dir.glob("*.md")]
         assert not any("PROJECT" in f or "MEMORY" in f for f in files)
+
+
+def _set_layout_version(repo: Path, value: int) -> None:
+    """Write layout_version into the vault's STATUS.md frontmatter."""
+    status = repo / "bedrock" / "STATUS.md"
+    text = status.read_text()
+    end = text.find("\n---", 3)
+    status.write_text(f"{text[:end]}\nlayout_version: {value}{text[end:]}", encoding="utf-8")
+
+
+def test_refresh_system_exits_zero_when_blocked_by_a_newer_layout(tmp_path: Path):
+    """A blocked refresh must warn and exit 0.
+
+    It runs from the SessionStart hook joined by &&, so a non-zero exit degrades
+    every agent session in the repo -- worse than the stale layout it reports.
+    """
+    from agent_knowledge.runtime.migrations import LAYOUT_VERSION
+
+    repo = _init_repo(tmp_path, "layout-newer")
+    kh = tmp_path / "kh"
+    _run("init", "--repo", str(repo), "--knowledge-home", str(kh))
+    _set_layout_version(repo, LAYOUT_VERSION + 1)
+
+    r = _run("refresh-system", "--project", str(repo))
+
+    assert r.returncode == 0, f"a blocked refresh must not fail the SessionStart hook: {r.stderr}"
+    assert "pip install -U project-bedrock" in r.stderr
+    assert "Refreshed to v" not in r.stderr, "a blocked run must not claim it refreshed anything"
+
+
+def test_sync_exits_zero_when_blocked_by_a_newer_layout(tmp_path: Path):
+    """sync is the first half of 'bedrock sync && bedrock refresh-system'.
+
+    A non-zero exit here would both fail the session and stop refresh-system
+    from ever running to report why.
+    """
+    from agent_knowledge.runtime.migrations import LAYOUT_VERSION
+
+    repo = _init_repo(tmp_path, "layout-newer-sync")
+    kh = tmp_path / "kh"
+    _run("init", "--repo", str(repo), "--knowledge-home", str(kh))
+    _set_layout_version(repo, LAYOUT_VERSION + 1)
+
+    r = _run("sync", "--project", str(repo))
+
+    assert r.returncode == 0, f"a blocked sync must not fail the SessionStart hook: {r.stderr}"
+    assert "pip install -U project-bedrock" in r.stderr
+    assert "Sync complete" not in r.stderr, "a blocked run must not claim it synced anything"
+
+
+def test_doctor_warns_when_the_project_layout_is_newer(tmp_path: Path):
+    """doctor must tell you which side of the version gap you are on."""
+    from agent_knowledge.runtime.migrations import LAYOUT_VERSION
+
+    repo = _init_repo(tmp_path, "layout-doctor")
+    kh = tmp_path / "kh"
+    _run("init", "--repo", str(repo), "--knowledge-home", str(kh))
+    _set_layout_version(repo, LAYOUT_VERSION + 1)
+
+    r = _run("doctor", "--project", str(repo))
+
+    assert "pip install -U project-bedrock" in r.stderr
+
+
+def _status_frontmatter(repo: Path) -> dict[str, str]:
+    """Parse bedrock/STATUS.md's leading frontmatter block into key -> value."""
+    text = (repo / "bedrock" / "STATUS.md").read_text(encoding="utf-8")
+    assert text.startswith("---\n")
+    block = text[4:].split("\n---", 1)[0]
+    fields: dict[str, str] = {}
+    for line in block.splitlines():
+        if ":" in line:
+            key, _, value = line.partition(":")
+            fields[key.strip()] = value.strip()
+    return fields
+
+
+def test_status_frontmatter_survives_doctor(tmp_path: Path):
+    """The shell rewrite of STATUS.md must not drop keys the Python layer owns.
+
+    kc_status_write rebuilds the frontmatter from a fixed field list, so every
+    key written elsewhere (framework_version, last_system_refresh,
+    layout_version) used to be erased on each doctor/sync/validate run.
+    """
+    repo = _init_repo(tmp_path, "status-frontmatter")
+    kh = tmp_path / "kh"
+    _run("init", "--repo", str(repo), "--knowledge-home", str(kh))
+    _run("refresh-system", "--project", str(repo))
+
+    before = _status_frontmatter(repo)
+    assert "framework_version" in before, "refresh-system should stamp framework_version"
+
+    status = repo / "bedrock" / "STATUS.md"
+    text = status.read_text(encoding="utf-8")
+    end = text.find("\n---", 3)
+    custom = "spaced: value/with, colon"
+    status.write_text(
+        f"{text[:end]}\nlayout_version: 7\ncustom_key: {custom}{text[end:]}",
+        encoding="utf-8",
+    )
+
+    r = _run("doctor", "--project", str(repo))
+    assert r.returncode == 0, r.stderr
+
+    after = _status_frontmatter(repo)
+    assert after.get("layout_version") == "7"
+    assert after.get("custom_key") == custom
+    assert after.get("framework_version") == before["framework_version"]
+    assert after.get("last_system_refresh") == before.get("last_system_refresh")
+
+    # Preserved keys must not drift or duplicate on a second rewrite.
+    _run("doctor", "--project", str(repo))
+    again = _status_frontmatter(repo)
+    preserved = ("layout_version", "custom_key", "framework_version", "last_system_refresh")
+    assert {k: again.get(k) for k in preserved} == {k: after.get(k) for k in preserved}
+    block = status.read_text(encoding="utf-8")[4:].split("\n---", 1)[0]
+    assert block.count("custom_key:") == 1
+    assert block.count("framework_version:") == 1
+
+
+def _common_lib() -> Path:
+    from agent_knowledge.runtime.paths import get_assets_dir
+
+    return get_assets_dir() / "scripts" / "lib" / "knowledge-common.sh"
+
+
+def _rewrite_status_via_shell(status: Path) -> None:
+    """Drive kc_status_load + kc_status_write directly, without a full CLI run."""
+    script = (
+        f'. "{_common_lib()}"\n'
+        f'STATUS_FILE="{status}"\n'
+        "kc_status_load\n"
+        "kc_status_write\n"
+    )
+    r = subprocess.run(["bash", "-c", script], capture_output=True, text=True, timeout=30)
+    assert r.returncode == 0, r.stderr
+
+
+def test_status_frontmatter_survives_a_crlf_file(tmp_path: Path):
+    """CRLF must not defeat the carry-through.
+
+    Git for Windows checks this file out with CRLF by default, and the awk
+    delimiter match used to see "---\\r" and bail, dropping every unmanaged key.
+    """
+    status = tmp_path / "bedrock" / "STATUS.md"
+    status.parent.mkdir(parents=True)
+    lf = (
+        "---\n"
+        "note_type: knowledge-status\n"
+        "project: crlf-repo\n"
+        "onboarding: complete\n"
+        "framework_version: 0.4.17\n"
+        "last_system_refresh: 2026-08-11T00:00:00Z\n"
+        "layout_version: 7\n"
+        'custom_key: spaced: value/with, "quotes"\n'
+        "---\n"
+        "\n"
+        "# Knowledge Status: crlf-repo\n"
+    )
+    status.write_bytes(lf.replace("\n", "\r\n").encode("utf-8"))
+
+    _rewrite_status_via_shell(status)
+
+    text = status.read_text(encoding="utf-8")
+    block = text[4:].split("\n---", 1)[0]
+    lines = [ln.rstrip("\r") for ln in block.splitlines()]
+    assert "layout_version: 7" in lines
+    assert 'custom_key: spaced: value/with, "quotes"' in lines
+    assert "framework_version: 0.4.17" in lines
+    assert "last_system_refresh: 2026-08-11T00:00:00Z" in lines
+
+    # And a second rewrite of the now-LF file must not duplicate them.
+    _rewrite_status_via_shell(status)
+    block = status.read_text(encoding="utf-8")[4:].split("\n---", 1)[0]
+    assert block.count("layout_version:") == 1
+    assert block.count("custom_key:") == 1
+
+
+def test_status_frontmatter_managed_key_lists_agree():
+    """The awk skip-list and the printf emit-list are one schema in two copies.
+
+    Adding a field to one and not the other produces a permanently duplicated
+    YAML key, which strict parsers reject and kc_yaml_leaf_value reads first-wins.
+    """
+    text = _common_lib().read_text(encoding="utf-8")
+
+    awk_list = " ".join(re.findall(r'managed_keys\s*=\s*(?:managed_keys\s*)?"([^"]*)"', text))
+    awk_keys = set(awk_list.split())
+    assert awk_keys, "could not find the awk managed-key list"
+
+    start = text.index("kc_status_write() {")
+    end = text.index("""printf '%s\\n\\n' '---'""", start)
+    printf_keys = set(re.findall(r"^\s*printf '([A-Za-z_][A-Za-z0-9_]*):", text[start:end], re.M))
+    assert printf_keys, "could not find the emitted frontmatter fields"
+
+    # 'profile' is the legacy alias of profile_hint: skipped on read, never emitted.
+    assert awk_keys - printf_keys == {"profile"}
+    assert printf_keys - awk_keys == set()
+
+
+def _run_lib_shell(script: str, timeout: int = 120) -> subprocess.CompletedProcess[str]:
+    """Source knowledge-common.sh and run a snippet against it."""
+    full = f'. "{_common_lib()}"\n{script}'
+    return subprocess.run(["bash", "-c", full], capture_output=True, text=True, timeout=timeout)
+
+
+def test_yaml_leaf_value_strips_cr_on_crlf_files(tmp_path: Path):
+    """A CRLF checkout must not leak \\r into every parsed frontmatter value.
+
+    Git for Windows defaults to core.autocrlf=true, so the record awk sees
+    ends in \\r: the value carries it, and the trailing-quote strip misses
+    because the quote is no longer at end-of-record.
+    """
+    f = tmp_path / "PROJECT.md"
+    f.write_bytes(b'---\r\nname: demo\r\nslug: "demo-slug"\r\n---\r\n')
+
+    # Bytes on purpose: text=True's universal newlines would hide the \r.
+    script = (
+        f'. "{_common_lib()}"\n'
+        f'kc_yaml_leaf_value "{f}" name\n'
+        f'kc_yaml_leaf_value "{f}" slug\n'
+    )
+    r = subprocess.run(["bash", "-c", script], capture_output=True, timeout=120)
+
+    assert r.returncode == 0, r.stderr
+    assert r.stdout == b"demo\ndemo-slug\n"
+
+
+def test_normalize_relative_path_sets_caller_named_variable():
+    """kc_normalize_relative_path must return via a variable, not stdout.
+
+    It is pure parameter expansion called tens of thousands of times per
+    init; a $(...) caller forks a subshell each time (agent-knowledge-3x7).
+    """
+    r = _run_lib_shell(
+        'kc_normalize_relative_path out "./foo/bar"\n'
+        'printf "<%s>" "$out"\n'
+        'kc_normalize_relative_path out "/abs/path"\n'
+        'printf "<%s>" "$out"\n'
+        'kc_normalize_relative_path out ""\n'
+        'printf "<%s>" "$out"\n'
+    )
+
+    assert r.returncode == 0, r.stderr
+    assert r.stdout == "<foo/bar><abs/path><>"
+
+
+def test_filter_relative_lines_honors_ignore_patterns(tmp_path: Path):
+    """Ignore semantics through the real loader: dir/, anchored, bare, glob."""
+    repo = tmp_path / "proj"
+    repo.mkdir()
+    (repo / ".agentknowledgeignore").write_text(
+        "# comment\n"
+        "\n"
+        "./docs/\n"
+        "/secrets\n"
+        "build\n"
+        "*.log\n",
+        encoding="utf-8",
+    )
+
+    r = _run_lib_shell(
+        f'kc_load_project_context "{repo}"\n'
+        "kc_filter_relative_lines <<'EOF'\n"
+        "./docs/a.md\n"
+        "secrets/key\n"
+        "src/main.py\n"
+        "build\n"
+        "buildx/file\n"
+        "debug.log\n"
+        "EOF\n"
+    )
+
+    assert r.returncode == 0, r.stderr
+    assert r.stdout == "src/main.py\nbuildx/file\n"
+
+
+def test_filter_relative_lines_does_not_fork_per_pattern(tmp_path: Path):
+    """1000 lines against 20 patterns must be near-instant builtin work.
+
+    The old shape forked 2 + N_patterns subshells per line (22k forks
+    here), which is what made init 16s (agent-knowledge-3x7). The 8s bound
+    is ~50x headroom for the builtin version even on a loaded machine.
+    """
+    repo = tmp_path / "proj"
+    repo.mkdir()
+    patterns = ["vendor/", "node_modules/"] + [f"pat{i}" for i in range(18)]
+    (repo / ".agentknowledgeignore").write_text("\n".join(patterns) + "\n", encoding="utf-8")
+
+    script = (
+        f'kc_load_project_context "{repo}"\n'
+        "i=0\n"
+        "lines=\"\"\n"
+        'while [ "$i" -lt 1000 ]; do\n'
+        '    lines="${lines}src/file_${i}.py\n'
+        '"\n'
+        "    i=$((i+1))\n"
+        "done\n"
+        'lines="${lines}vendor/skipme.py\n'
+        '"\n'
+        'printf "%s" "$lines" | kc_filter_relative_lines | wc -l\n'
+    )
+
+    start = time.monotonic()
+    r = _run_lib_shell(script, timeout=180)
+    elapsed = time.monotonic() - start
+
+    assert r.returncode == 0, r.stderr
+    assert r.stdout.strip() == "1000"
+    assert elapsed < 8.0, f"kc_filter_relative_lines took {elapsed:.1f}s for 1000 lines"
+
+
+# -- migrate-from-legacy --------------------------------------------------- #
+
+
+def test_migrate_from_legacy_runs(tmp_path: Path):
+    """The documented upgrade path from agent-knowledge-cli must actually run.
+
+    It had no coverage at all, which is how it shipped calling run_refresh with
+    a json_mode kwarg that does not exist.
+    """
+    repo = _init_repo(tmp_path, "legacy-migrate")
+    kh = tmp_path / "kh"
+    _run("init", "--repo", str(repo), "--knowledge-home", str(kh))
+
+    r = _run("migrate-from-legacy", "--project", str(repo))
+
+    assert r.returncode == 0, f"migrate-from-legacy crashed: {r.stderr}"
+    assert "Traceback" not in r.stderr
+    assert "pip uninstall agent-knowledge-cli" in r.stdout
+
+
+def test_migrate_from_legacy_reports_a_refresh_it_actually_did(tmp_path: Path):
+    """It must report the real refresh outcome, not compare a dict to a string."""
+    repo = _init_repo(tmp_path, "legacy-migrate-report")
+    kh = tmp_path / "kh"
+    _run("init", "--repo", str(repo), "--knowledge-home", str(kh))
+    _run("refresh-system", "--project", str(repo))
+
+    # Second migrate on an already-current project: nothing left to change.
+    r = _run("migrate-from-legacy", "--project", str(repo))
+
+    assert r.returncode == 0, f"migrate-from-legacy crashed: {r.stderr}"
+    assert "already up to date" in r.stdout.lower()

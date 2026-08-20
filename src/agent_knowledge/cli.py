@@ -11,17 +11,14 @@ import click
 
 from agent_knowledge import __version__
 from agent_knowledge.runtime.paths import get_assets_dir
-from agent_knowledge.runtime.shell import run_bash_script, run_python_script
+from agent_knowledge.runtime.shell import open_in_browser, run_bash_script, run_python_script
 
 
-def _open_in_browser(path: Path) -> None:
-    """Open a local file in the system browser, reliably across platforms."""
-    if sys.platform == "darwin":
-        subprocess.run(["open", str(path)], check=False)
-    elif sys.platform.startswith("linux"):
-        subprocess.run(["xdg-open", str(path)], check=False)
-    else:
-        os.startfile(str(path))  # Windows
+def _open_in_browser(target: Path | str) -> None:
+    """Open a local file or URL in the system browser, or print it if there is none."""
+    target = target.as_uri() if isinstance(target, Path) else target
+    if not open_in_browser(target):
+        click.echo(f"no display detected; open it yourself: {target}", err=True)
 
 
 def _add_common_flags(
@@ -48,34 +45,30 @@ def main() -> None:
 
 # -- helpers --------------------------------------------------------------- #
 
-_LOCAL_GITIGNORE_BLOCK = """\
-# bedrock: noisy auto-generated content excluded from git
-# Curated knowledge (Memory/, Work/, History/, Evidence/imports/) IS tracked.
-bedrock/Evidence/raw/
-bedrock/Views/site/
-bedrock/Views/graph/*.json
-bedrock/Views/graph/*.md
-bedrock/Views/graph/*.canvas
-bedrock/Outputs/absorb-manifest.md
-bedrock/.obsidian/workspace
-bedrock/.obsidian/workspace.json
-bedrock/.obsidian/workspaces.json
-"""
+def _resolve_project(project: str) -> str:
+    """Resolve --project to the enclosing bedrock project, walking up if needed.
 
-_LOCAL_GITIGNORE_SENTINEL = "bedrock/Evidence/raw/"
+    Hooks run in whatever directory the agent happened to be in, which is not
+    always the repo root. Walking up lets a generated hook command carry no path
+    at all -- nothing to hardcode, nothing to quote, and nothing that depends on
+    the shell expanding a variable (Windows hooks may run under PowerShell).
+
+    A directory that is itself a connected project is returned untouched, so an
+    explicit --project always wins.
+    """
+    start = Path(project).resolve()
+    for candidate in (start, *start.parents):
+        if (candidate / ".agent-project.yaml").is_file():
+            return str(candidate)
+    return str(start)
 
 
 def _patch_gitignore_for_local_knowledge(repo_path: Path, json_mode: bool) -> None:
     """Append local-mode knowledge gitignore patterns if not already present."""
-    gitignore = repo_path / ".gitignore"
-    if gitignore.exists():
-        content = gitignore.read_text(encoding="utf-8")
-        if _LOCAL_GITIGNORE_SENTINEL in content:
-            return  # already patched
-        gitignore.write_text(content.rstrip("\n") + "\n\n" + _LOCAL_GITIGNORE_BLOCK, encoding="utf-8")
-    else:
-        gitignore.write_text(_LOCAL_GITIGNORE_BLOCK, encoding="utf-8")
-    if not json_mode:
+    from agent_knowledge.runtime.gitignore import ensure_patterns
+
+    added = ensure_patterns(repo_path)
+    if added and not json_mode:
         click.echo("  .gitignore: added local knowledge patterns", err=True)
 
 
@@ -205,7 +198,7 @@ def init(
         _maybe_star()
 
 
-_REPO_URL = "https://github.com/robotaitai/agent-knowledge"
+_REPO_URL = "https://github.com/robotaitai/project-bedrock"
 _STAR_MARKER = Path.home() / ".bedrock-starred"
 
 
@@ -222,9 +215,7 @@ def _maybe_star() -> None:
             default=True,
             err=True,
         ):
-            import webbrowser
-
-            webbrowser.open(_REPO_URL)
+            _open_in_browser(_REPO_URL)
     except (EOFError, KeyboardInterrupt):
         click.echo("", err=True)
     _STAR_MARKER.touch()
@@ -258,18 +249,29 @@ def sync(project: str, dry_run: bool, json_mode: bool) -> None:
 
     from agent_knowledge.runtime.sync import run_sync
 
-    repo_path = Path(project).resolve()
-    results = run_sync(repo_path, dry_run=dry_run)
+    repo_path = Path(_resolve_project(project))
+    result = run_sync(repo_path, dry_run=dry_run)
 
     if json_mode:
-        click.echo(json_mod.dumps({"sync": results}, indent=2))
+        # Step keys stay at the top level of "sync" for backward compatibility.
+        payload = dict(result["steps"])
+        payload["action"] = result["action"]
+        payload["warnings"] = result["warnings"]
+        click.echo(json_mod.dumps({"sync": payload}, indent=2))
     else:
-        for step, actions in results.items():
+        for step, actions in result["steps"].items():
             click.echo(f"[{step}]", err=True)
             for action in actions:
                 click.echo(action, err=True)
             click.echo("", err=True)
 
+        for warning in result["warnings"]:
+            click.secho(warning, fg="yellow", err=True)
+
+        if result["action"] == "blocked":
+            # Exits 0: this runs from SessionStart joined by &&, so failing here
+            # would take down the whole agent session.
+            return
         if dry_run:
             click.echo("(dry-run -- no changes written)", err=True)
         else:
@@ -337,6 +339,7 @@ def update(
     json_mode: bool,
 ) -> None:
     """Sync project changes into the knowledge tree."""
+    project = _resolve_project(project)
     args = ["--project", project]
     if compact:
         args.append("--compact")
@@ -347,7 +350,8 @@ def update(
     if decision_slug:
         args.extend(["--decision-slug", decision_slug])
     if summary_file:
-        args.extend(["--summary-file", summary_file])
+        # Relative to the project, not to wherever the agent happened to be.
+        args.extend(["--summary-file", str(Path(project) / summary_file)])
     _add_common_flags(args, dry_run=dry_run, json_mode=json_mode)
     sys.exit(run_bash_script("update-knowledge.sh", args))
 
@@ -370,8 +374,16 @@ def doctor(project: str, dry_run: bool, json_mode: bool) -> None:
         check_stale_notes,
     )
     from agent_knowledge.runtime.history import history_exists
+    from agent_knowledge.runtime.health import check_install_health
 
-    repo_root = Path(project).resolve()
+    repo_root = Path(_resolve_project(project))
+
+    # Install health check (legacy/shadowed package copies that block updates)
+    install_issues = check_install_health()
+    if install_issues and not json_mode:
+        for issue in install_issues:
+            click.secho(f"Warning: {issue}", fg="yellow", err=True)
+        click.echo("", err=True)
 
     # Framework version staleness check
     stale, prior, current = is_stale(repo_root)
@@ -391,6 +403,28 @@ def doctor(project: str, dry_run: bool, json_mode: bool) -> None:
                 err=True,
             )
         click.echo("", err=True)
+
+    # Layout-version check -- which side of the version gap this install is on
+    if not json_mode:
+        from agent_knowledge.runtime.migrations import LAYOUT_VERSION, read_layout_version
+
+        project_layout = read_layout_version(repo_root)
+        if project_layout > LAYOUT_VERSION:
+            click.secho(
+                f"Warning: project layout {project_layout} is newer than this install "
+                f"({LAYOUT_VERSION}). Run: pip install -U project-bedrock",
+                fg="yellow",
+                err=True,
+            )
+            click.echo("", err=True)
+        elif project_layout < LAYOUT_VERSION:
+            click.secho(
+                f"Warning: project layout {project_layout} is behind this install "
+                f"({LAYOUT_VERSION}). Run: bedrock refresh-system",
+                fg="yellow",
+                err=True,
+            )
+            click.echo("", err=True)
 
     # Cursor integration health check
     cursor_health = check_cursor_integration(repo_root)
@@ -716,11 +750,18 @@ def export_html(
 @main.command()
 @click.option("--project", default=".", type=click.Path(exists=True), help="Project repo root.")
 @click.option("--output-dir", default=None, type=click.Path(), help="Override output directory for the site.")
-def view(project: str, output_dir: str | None) -> None:
+@click.option("--serve", is_flag=True, help="Serve the site over a local HTTP server instead of file:// (blocks until Ctrl-C).")
+@click.option("--port", default=0, type=click.IntRange(0, 65535), help="Port for --serve (default: any free port).")
+@click.option("--no-open", "no_open", is_flag=True, help="Generate the site and print its path without opening a browser.")
+def view(project: str, output_dir: str | None, serve: bool, port: int, no_open: bool) -> None:
     """Build the knowledge site and open it in the browser.
 
     Equivalent to export-html --open. No Obsidian required.
     The site is generated into Views/site/ by default and opened via file://.
+    Use --serve when the browser restricts local files (strict CSP, sandboxed
+    profiles) or when working over SSH, where the port can be forwarded.
+    On a headless box or an SSH session the browser is skipped and the path is
+    printed instead; --no-open forces that everywhere.
     """
     from agent_knowledge.runtime.site import generate_site
 
@@ -732,7 +773,44 @@ def view(project: str, output_dir: str | None) -> None:
     out_dir = Path(output_dir).resolve() if output_dir else None
     result = generate_site(vault, out_dir)
     click.echo(f"{result['action']}: {result['site_dir']}", err=True)
+
+    if serve:
+        _serve_site(Path(result["site_dir"]), Path(result["index_html"]), port, no_open=no_open)
+        return
+
+    if no_open:
+        click.echo(Path(result["index_html"]).as_uri(), err=True)
+        return
+
     _open_in_browser(Path(result["index_html"]))
+
+
+def _serve_site(site_dir: Path, index_html: Path, port: int, *, no_open: bool = False) -> None:
+    """Serve a generated site over a local HTTP server until interrupted."""
+    import functools
+    from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+
+    handler = functools.partial(SimpleHTTPRequestHandler, directory=str(site_dir))
+    try:
+        httpd = ThreadingHTTPServer(("127.0.0.1", port), handler)
+    except OSError as exc:
+        click.echo(f"Could not start local server on port {port}: {exc}", err=True)
+        sys.exit(1)
+
+    try:
+        rel = index_html.relative_to(site_dir).as_posix()
+    except ValueError:
+        rel = "index.html"
+    url = f"http://127.0.0.1:{httpd.server_address[1]}/{rel}"
+    click.echo(f"serving: {url}  (Ctrl-C to stop)", err=True)
+    if not no_open:
+        open_in_browser(url)
+    try:
+        httpd.serve_forever()
+    except KeyboardInterrupt:
+        click.echo("", err=True)
+    finally:
+        httpd.server_close()
 
 
 # -- clean-import ---------------------------------------------------------- #
@@ -1045,11 +1123,20 @@ def refresh_system(project: str, dry_run: bool, json_mode: bool, force: bool) ->
 
     from agent_knowledge.runtime.refresh import run_refresh
 
-    repo_root = Path(project).resolve()
+    repo_root = Path(_resolve_project(project))
     result = run_refresh(repo_root, dry_run=dry_run, force=force)
 
     if json_mode:
         click.echo(json_mod.dumps(result, indent=2))
+        return
+
+    if result["action"] == "blocked":
+        for w in result.get("warnings", []):
+            click.secho(f"Warning: {w}", fg="yellow", err=True)
+        click.echo("", err=True)
+        click.echo("No files were changed.", err=True)
+        # Deliberately exit 0: this runs from the SessionStart hook, joined by
+        # &&, and a non-zero exit would degrade every session in the repo.
         return
 
     action = result["action"]
@@ -1061,6 +1148,14 @@ def refresh_system(project: str, dry_run: bool, json_mode: bool, force: bool) ->
     if not dry_run:
         if action == "up-to-date":
             click.secho(f"Up to date. (framework v{version})", bold=True, err=True)
+        elif action == "degraded":
+            # Something below failed, so do not headline this as a clean refresh.
+            click.secho(
+                f"Refresh incomplete (framework v{version}) -- see errors below.",
+                bold=True,
+                fg="yellow",
+                err=True,
+            )
         else:
             label = "dry-run preview" if dry_run else f"Refreshed to v{version}"
             if prior and prior != version:
@@ -1086,6 +1181,8 @@ def refresh_system(project: str, dry_run: bool, json_mode: bool, force: bool) ->
             click.echo(f"  skip     {target}  ({detail})", err=True)
         elif act == "warn":
             click.secho(f"  warn     {target}  ({detail})", fg="yellow", err=True)
+        elif act == "failed":
+            click.secho(f"  failed   {target}  ({detail})", fg="red", err=True)
 
     if warnings:
         click.echo("", err=True)
@@ -1204,10 +1301,11 @@ def migrate_to_local(project: str, knowledge_home: str | None, dry_run: bool) ->
                 text = text.replace(
                     "pointer_path:", "vault_mode: local\n  pointer_path:", 1
                 )
-            # Update real_path to in-repo path
+            # Update real_path to the in-repo vault, recorded relatively so the
+            # tracked file stays valid on every machine that clones the repo.
             text = _re.sub(
                 r"real_path:\s*\S+",
-                f"real_path: {pointer}",
+                "real_path: ./bedrock",
                 text,
             )
             project_yaml.write_text(text, encoding="utf-8")
@@ -1359,9 +1457,15 @@ def migrate_from_legacy(project: str, dry_run: bool) -> None:
         click.echo("(dry-run mode -- no files will be changed)")
 
     # Step 1: refresh-system updates hooks/rules/commands to use 'bedrock'
-    action = run_refresh(repo_root, dry_run=dry_run, json_mode=False)
+    result = run_refresh(repo_root, dry_run=dry_run)
 
-    if action == "up-to-date":
+    for warning in result.get("warnings", []):
+        click.secho(warning, fg="yellow", err=True)
+
+    if result["action"] == "blocked":
+        # An older install must not rewrite a newer project's integration files.
+        return
+    if result["action"] == "up-to-date":
         click.secho("Integration files already up to date.", fg="green")
     else:
         click.secho("Integration files refreshed.", fg="green")
@@ -1714,21 +1818,42 @@ def upgrade(yes: bool, check: bool) -> None:
 
     click.echo(f"New version available: {latest}", err=True)
 
+    # Warn about legacy installs that will block the upgrade from taking effect.
+    from agent_knowledge.runtime.health import find_legacy_installs, detect_install_method
+
+    legacy = find_legacy_installs()
+    if legacy:
+        method = detect_install_method()
+        click.secho(
+            "Legacy install(s) detected that can shadow this upgrade; remove them first:",
+            fg="yellow",
+            err=True,
+        )
+        for item in legacy:
+            if method == "pipx":
+                cmd = f"pipx uninstall {item['name']}"
+            elif method == "uv":
+                cmd = f"uv tool uninstall {item['name']}"
+            else:
+                cmd = f"{Path(sys.executable).name} -m pip uninstall -y {item['name']}"
+            click.secho(f"  {item['name']} {item['version']}  ->  {cmd}", fg="yellow", err=True)
+        click.echo("", err=True)
+
     if check:
         return
 
-    # Detect installer: pipx wraps the executable inside a venv it manages
-    exe = Path(sys.executable)
-    in_pipx = "pipx" in str(exe) or "pipx" in os.environ.get("PIPX_HOME", "")
-    if not in_pipx:
-        # Also check if the bedrock script lives in a pipx bin dir
-        import shutil
-        bedrock_exe = shutil.which("bedrock") or ""
-        in_pipx = "pipx" in bedrock_exe
+    # Detect installer. uv tool and pipx each wrap bedrock in their own venv;
+    # using the wrong upgrader silently no-ops or fails, so match the source.
+    import shutil
 
-    if in_pipx:
+    bedrock_exe = shutil.which("bedrock") or ""
+    haystack = f"{sys.executable} {bedrock_exe} {sys.prefix} {os.environ.get('PIPX_HOME', '')}".lower()
+    if "pipx" in haystack:
         upgrade_cmd = ["pipx", "upgrade", "project-bedrock"]
         installer = "pipx"
+    elif (os.sep + "uv" + os.sep) in haystack or "/uv/tools/" in haystack:
+        upgrade_cmd = ["uv", "tool", "upgrade", "project-bedrock"]
+        installer = "uv tool"
     else:
         upgrade_cmd = [sys.executable, "-m", "pip", "install", "--upgrade", "project-bedrock"]
         installer = "pip"

@@ -1,13 +1,16 @@
-Perform a project memory update.
+Update the project cockpit.
 
 Steps:
 1. Run in terminal: `bedrock sync --project .`
-2. Review this session's work and identify what stable project knowledge changed
-3. For each changed area, update the relevant `./bedrock/Memory/<branch>.md`:
-   - Edit the Current State section with confirmed facts
-   - Add a dated entry to Recent Changes: `YYYY-MM-DD -- what changed`
-4. If branch summaries changed, update `./bedrock/Memory/MEMORY.md`
-5. Summarize: what branches were updated, what was skipped, and why
+2. Review what changed and what was learned
+3. Update `./bedrock/Memory/` with stable, confirmed project knowledge -- put area-specific facts in that area's own doc (`Memory/<area>.md`), creating it if the area has none yet
+4. Update `./bedrock/Work/NOW.md` if the current focus, next actions, or blockers changed
+5. Update `./bedrock/Work/open-questions.md`, `./bedrock/Work/risks.md`, or `./bedrock/Work/backlog.md` if needed
+6. Summarize what changed in Memory, what changed in Work, and what was intentionally skipped
 
-Write to Memory only for stable, confirmed facts. Skip speculative or session-only context.
-Evidence and captures go to `Evidence/`, not `Memory/`.
+Rules:
+- Stable facts go into `Memory/`, in the doc for the area they belong to
+- One doc per subsystem: `Memory/<area>.md` for the design, `Memory/decisions.md` for dated rationale, `Memory/PROJECT.md` for the cross-area overview only
+- Current priorities and open loops go into `Work/`
+- Generated site or graph output stays in `Views/`
+- Do not dump raw session notes into the cockpit

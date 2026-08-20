@@ -287,13 +287,17 @@ copy_static_template "$PROJECT_TEMPLATE_DIR/Work/risks.md" "$WORK_DIR/risks.md" 
 # STATUS.md
 # ---------------------------------------------------------------------------
 
+# Local vaults record ./bedrock so the tracked STATUS.md is machine-independent.
+STATUS_REAL_PATH_VALUE="$KNOWLEDGE_REAL_DIR"
+[ "${VAULT_MODE:-external}" = "local" ] && STATUS_REAL_PATH_VALUE="./bedrock"
+
 kc_replace_in_template \
     "$STATUS_TEMPLATE" \
     "$STATUS_FILE" \
     "bedrock/STATUS.md" \
     "<project-name>" "$PROJECT_NAME" \
     "<profile-type>" "$PROFILE" \
-    "<absolute-path-to-dedicated-knowledge-folder>" "$KNOWLEDGE_REAL_DIR"
+    "<absolute-path-to-dedicated-knowledge-folder>" "$STATUS_REAL_PATH_VALUE"
 case "$KC_LAST_ACTION" in
     created|updated|would-create|would-update)
         CHANGES+=("bedrock/STATUS.md")
@@ -306,7 +310,7 @@ esac
 
 kc_status_load
 STATUS_PROFILE="$PROFILE"
-STATUS_REAL_PATH="$KNOWLEDGE_REAL_DIR"
+STATUS_REAL_PATH="$STATUS_REAL_PATH_VALUE"
 STATUS_POINTER_PATH="$POINTER_DISPLAY"
 if [ "${DRY_RUN:-0}" -eq 0 ] && [ ${#CHANGES[@]} -gt 0 ]; then
     STATUS_LAST_BOOTSTRAP="$(kc_now_utc)"

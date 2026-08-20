@@ -19,6 +19,8 @@ from pathlib import Path
 from typing import Any
 
 from agent_knowledge import __version__
+from agent_knowledge.runtime import migrations as _migrations
+from agent_knowledge.runtime.frontmatter import fm_get, fm_set
 from agent_knowledge.runtime.paths import get_assets_dir
 
 
@@ -42,37 +44,18 @@ def _write(path: Path, content: str, *, dry_run: bool) -> str:
     if dry_run:
         return "dry-run"
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(content, encoding="utf-8")
+    # newline="\n" pins LF: the default translates to os.linesep, which would
+    # rewrite these files as CRLF on Windows and desync them from the shell
+    # scripts that rewrite the same frontmatter with LF. Written via open()
+    # because Path.write_text() only accepts newline on Python 3.10+.
+    with path.open("w", encoding="utf-8", newline="\n") as fh:
+        fh.write(content)
     return "updated"
 
 
-def _fm_get(text: str, key: str) -> str:
-    """Read a field from YAML frontmatter."""
-    if not text.startswith("---"):
-        return ""
-    end = text.find("\n---", 3)
-    if end < 0:
-        return ""
-    m = re.search(rf"^{re.escape(key)}:\s*(.+)$", text[4:end], re.MULTILINE)
-    return m.group(1).strip().strip("\"'") if m else ""
-
-
-def _fm_set(text: str, key: str, value: str) -> str:
-    """Add or update a field in YAML frontmatter."""
-    if not text.startswith("---"):
-        # No frontmatter — don't add one silently
-        return text
-    end = text.find("\n---", 3)
-    if end < 0:
-        return text
-    fm_body = text[4:end]
-    rest = text[end + 4:]
-    pattern = rf"^{re.escape(key)}:.*$"
-    if re.search(pattern, fm_body, re.MULTILINE):
-        fm_body = re.sub(pattern, f"{key}: {value}", fm_body, flags=re.MULTILINE)
-    else:
-        fm_body = fm_body.rstrip("\n") + f"\n{key}: {value}\n"
-    return f"---\n{fm_body}\n---{rest}"
+# Kept as module-private aliases so existing call sites read unchanged.
+_fm_get = fm_get
+_fm_set = fm_set
 
 
 def _yaml_set(text: str, key: str, value: str) -> str:
@@ -89,6 +72,85 @@ def _normalize_json(text: str) -> dict | None:
         return json.loads(text)
     except (json.JSONDecodeError, ValueError):
         return None
+
+
+# Hook commands bedrock has ever generated, current and historical
+# (agent-knowledge is the pre-rename spelling). A command must match one of
+# these *in full* to be replaced: anything a project extended -- for example
+# "bedrock sync --project . && npm run notify" -- is its own config and must
+# survive a refresh. The argument pattern stops at a shell operator so a chained
+# command cannot be swallowed, but allows spaces and quotes inside one argument.
+_CLI = r"(?:bedrock|agent-knowledge)"
+_ARG = r"""(?:"[^"]*"|'[^']*'|[^&|;<>]+?)"""
+# --project is optional: current templates omit it entirely and let the CLI walk
+# up to the project root, but every historical form still has to be recognized
+# so an old checkout is repaired rather than left alone.
+_PROJ = rf"(?: --project {_ARG})?"
+_SUMMARY = rf"(?: --summary-file {_ARG})?"
+_GENERATED_HOOK_COMMANDS = tuple(
+    re.compile(pattern)
+    for pattern in (
+        rf"{_CLI} sync{_PROJ}",
+        rf"{_CLI} sync{_PROJ} && {_CLI} refresh-system{_PROJ}",
+        rf"{_CLI} update{_SUMMARY}{_PROJ}",
+    )
+)
+
+
+def _is_bedrock_command(command: Any) -> bool:
+    if not isinstance(command, str):
+        return False
+    stripped = command.strip()
+    return any(p.fullmatch(stripped) for p in _GENERATED_HOOK_COMMANDS)
+
+
+def _merge_claude_hooks(template: dict, current: dict) -> dict:
+    """Replace bedrock-owned Claude hooks with the template's, keep everything else.
+
+    `.claude/settings.json` is shared with the project (permissions, env, and
+    hooks the project added itself), so a refresh may only rewrite the entries
+    bedrock generated.
+    """
+    merged = json.loads(json.dumps(current))
+    tmpl_hooks = template.get("hooks") or {}
+    curr_hooks = merged.get("hooks")
+    if not isinstance(curr_hooks, dict):
+        curr_hooks = {}
+
+    for event, tmpl_groups in tmpl_hooks.items():
+        kept: list[Any] = []
+        for group in curr_hooks.get(event, []) or []:
+            if not isinstance(group, dict):
+                kept.append(group)
+                continue
+            inner = [
+                h
+                for h in (group.get("hooks") or [])
+                if not (isinstance(h, dict) and _is_bedrock_command(h.get("command")))
+            ]
+            if inner:
+                kept.append({**group, "hooks": inner})
+        curr_hooks[event] = list(tmpl_groups) + kept
+
+    merged["hooks"] = curr_hooks
+    return merged
+
+
+def _merge_cursor_hooks(template: dict, current: dict) -> dict:
+    """Replace bedrock-owned Cursor hooks with the template's, keep everything else."""
+    merged = json.loads(json.dumps(current))
+    if template.get("version") is not None:
+        merged["version"] = template["version"]
+    if template.get("description"):
+        merged["description"] = template["description"]
+
+    kept = [
+        h
+        for h in (merged.get("hooks") or [])
+        if not (isinstance(h, dict) and _is_bedrock_command(h.get("command")))
+    ]
+    merged["hooks"] = list(template.get("hooks") or []) + kept
+    return merged
 
 
 # --------------------------------------------------------------------------- #
@@ -141,20 +203,17 @@ def _refresh_cursor_hooks(repo_root: Path, *, dry_run: bool) -> dict[str, Any]:
     if not target.is_file():
         return {"target": ".cursor/hooks.json", "action": "skip", "detail": "not installed; run: bedrock init"}
 
-    repo_abs = repo_root.resolve().as_posix()
-    template_content = template_path.read_text(encoding="utf-8").replace("<repo-path>", repo_abs)
-    current_content = target.read_text(encoding="utf-8", errors="replace")
-
-    tmpl_obj = _normalize_json(template_content)
-    curr_obj = _normalize_json(current_content)
+    tmpl_obj = _normalize_json(template_path.read_text(encoding="utf-8"))
+    curr_obj = _normalize_json(target.read_text(encoding="utf-8", errors="replace"))
 
     if tmpl_obj is None or curr_obj is None:
         return {"target": ".cursor/hooks.json", "action": "skip", "detail": "could not parse JSON"}
 
-    if tmpl_obj == curr_obj:
+    merged = _merge_cursor_hooks(tmpl_obj, curr_obj)
+    if merged == curr_obj:
         return {"target": ".cursor/hooks.json", "action": "up-to-date", "detail": "hooks match current template"}
 
-    action = _write(target, template_content, dry_run=dry_run)
+    action = _write(target, json.dumps(merged, indent=2) + "\n", dry_run=dry_run)
     return {"target": ".cursor/hooks.json", "action": action, "detail": "refreshed from bundled template"}
 
 
@@ -200,21 +259,18 @@ def _refresh_claude_settings(repo_root: Path, *, dry_run: bool) -> dict[str, Any
     if not target.is_file():
         return {"target": ".claude/settings.json", "action": "skip", "detail": "not installed; run: bedrock init"}
 
-    repo_abs = repo_root.resolve().as_posix()
-    template_content = template_path.read_text(encoding="utf-8").replace("<repo-path>", repo_abs)
-    current_content = target.read_text(encoding="utf-8", errors="replace")
-
-    tmpl_obj = _normalize_json(template_content)
-    curr_obj = _normalize_json(current_content)
+    tmpl_obj = _normalize_json(template_path.read_text(encoding="utf-8"))
+    curr_obj = _normalize_json(target.read_text(encoding="utf-8", errors="replace"))
 
     if tmpl_obj is None or curr_obj is None:
         return {"target": ".claude/settings.json", "action": "skip", "detail": "could not parse JSON"}
 
-    if tmpl_obj == curr_obj:
+    merged = _merge_claude_hooks(tmpl_obj, curr_obj)
+    if merged == curr_obj:
         return {"target": ".claude/settings.json", "action": "up-to-date", "detail": "settings match current template"}
 
-    action = _write(target, template_content, dry_run=dry_run)
-    return {"target": ".claude/settings.json", "action": action, "detail": "refreshed from bundled template"}
+    action = _write(target, json.dumps(merged, indent=2) + "\n", dry_run=dry_run)
+    return {"target": ".claude/settings.json", "action": action, "detail": "refreshed bedrock hooks, preserved project settings"}
 
 
 def _refresh_claude_md(repo_root: Path, *, dry_run: bool) -> dict[str, Any]:
@@ -381,8 +437,28 @@ def _refresh_status_md(vault_dir: Path, version: str, *, dry_run: bool) -> dict[
     return {"target": "STATUS.md", "action": action, "detail": detail}
 
 
+def _localize_real_path(text: str) -> tuple[str, bool]:
+    """Rewrite an absolute `real_path` to `./bedrock` for local vaults.
+
+    In `vault_mode: local` the vault is always `<repo>/bedrock`, so an absolute
+    path only records which machine generated the file and breaks every other
+    clone. The rest of the file is already relative.
+    """
+    if not re.search(r"""^\s*vault_mode:\s*["']?local["']?\s*$""", text, re.MULTILINE):
+        return text, False
+    # Match the whole line, not a \S+ token: the paths this exists to fix are
+    # exactly the ones that may contain spaces or quotes.
+    m = re.search(r"^(\s*real_path:)[ \t]*(.*)$", text, re.MULTILINE)
+    if not m:
+        return text, False
+    value = m.group(2).strip().strip("\"'")
+    if not value or value.startswith((".", "$", "<")):
+        return text, False
+    return text[: m.start()] + f"{m.group(1)} ./bedrock" + text[m.end():], True
+
+
 def _refresh_project_yaml(repo_root: Path, version: str, *, dry_run: bool) -> dict[str, Any]:
-    """Update framework_version in .agent-project.yaml."""
+    """Update framework_version and de-absolutize real_path in .agent-project.yaml."""
     target = repo_root / ".agent-project.yaml"
 
     if not target.is_file():
@@ -394,15 +470,42 @@ def _refresh_project_yaml(repo_root: Path, version: str, *, dry_run: bool) -> di
     if m:
         prior = m.group(1).strip().strip("\"'")
 
-    if prior == version:
+    # Unconditional, not a migration: an older CLI on another machine can
+    # reintroduce an absolute path at any time, so this must re-run every refresh.
+    updated, localized = _localize_real_path(current)
+
+    if prior == version and not localized:
         return {"target": ".agent-project.yaml", "action": "up-to-date", "detail": f"framework_version already {version}"}
 
-    updated = _yaml_set(current, "framework_version", version)
+    if prior != version:
+        updated = _yaml_set(updated, "framework_version", version)
+
     action = _write(target, updated, dry_run=dry_run)
-    detail = f"set framework_version: {version}"
-    if prior:
-        detail += f" (was: {prior})"
-    return {"target": ".agent-project.yaml", "action": action, "detail": detail}
+    details = []
+    if prior != version:
+        details.append(f"set framework_version: {version}" + (f" (was: {prior})" if prior else ""))
+    if localized:
+        details.append("real_path -> ./bedrock (portable across machines)")
+    return {"target": ".agent-project.yaml", "action": action, "detail": "; ".join(details)}
+
+
+def _refresh_gitignore(repo_root: Path, *, dry_run: bool) -> dict[str, Any]:
+    """Add bedrock-owned .gitignore patterns the project is missing.
+
+    `connect` wrote the patterns known at the time. refresh-system runs every
+    session, so it is where an existing checkout picks up patterns added since.
+    """
+    from agent_knowledge.runtime.gitignore import ensure_patterns
+
+    if not (repo_root / ".gitignore").is_file():
+        return {"target": ".gitignore", "action": "skip", "detail": "no .gitignore in this repo"}
+
+    missing = ensure_patterns(repo_root, dry_run=dry_run)
+    if not missing:
+        return {"target": ".gitignore", "action": "up-to-date", "detail": "all bedrock patterns present"}
+
+    action = "dry-run" if dry_run else "updated"
+    return {"target": ".gitignore", "action": action, "detail": f"added {', '.join(missing)}"}
 
 
 # --------------------------------------------------------------------------- #
@@ -682,8 +785,52 @@ def run_refresh(
     status_text = _read_text(vault_dir / "STATUS.md")
     prior_version = _fm_get(status_text, "framework_version") or None
 
+    project_layout = _migrations.read_layout_version(repo_root)
+
     changes: list[dict[str, Any]] = []
     warnings: list[str] = []
+
+    if project_layout > _migrations.LAYOUT_VERSION:
+        # Write nothing: an older CLI would revert a newer project's layout, and
+        # this runs from SessionStart, so it would happen on every session.
+        warnings.append(
+            f"This project uses bedrock layout {project_layout}; this install understands "
+            f"{_migrations.LAYOUT_VERSION}. Run: pip install -U project-bedrock"
+        )
+        return {
+            "action": "blocked",
+            "framework_version": version,
+            "prior_version": prior_version,
+            "layout_version": _migrations.LAYOUT_VERSION,
+            "project_layout_version": project_layout,
+            "dry_run": dry_run,
+            "integrations_detected": [k for k, v in detected.items() if v],
+            "changes": [],
+            "warnings": warnings,
+        }
+
+    try:
+        run = _migrations.run_migrations(repo_root, dry_run=dry_run)
+    except Exception as exc:
+        # The chain stopped and left the version unstamped, so it replays next
+        # session. Templates do not depend on the layout, so the refresh goes on.
+        # The type is kept because a broken session is this failure's only surface,
+        # and `str(exc)` alone renders KeyError("Memory") as 'Memory'.
+        detail = f"{type(exc).__name__}: {exc}"
+        warnings.append(f"Layout migration failed: {detail}")
+        changes.append({"target": "layout migration", "action": "failed", "detail": detail})
+    else:
+        for applied in run.applied:
+            changes.append({
+                "target": "layout migration",
+                "action": "dry-run" if dry_run else "updated",
+                "detail": f"{applied.version}: {applied.name}",
+            })
+        if not run.stamped:
+            warnings.append(
+                "Could not record layout_version in bedrock/STATUS.md; "
+                "these migrations will replay next session."
+            )
 
     # AGENTS.md — the primary agent contract file
     r = _refresh_agents_md(repo_root, dry_run=dry_run)
@@ -732,6 +879,9 @@ def run_refresh(
     r = _refresh_project_yaml(repo_root, version, dry_run=dry_run)
     changes.append(r)
 
+    # .gitignore — pick up per-machine patterns an older connect never wrote
+    changes.append(_refresh_gitignore(repo_root, dry_run=dry_run))
+
     # Regenerate the HTML site if one already exists (picks up new templates/styles)
     site_html = vault_dir / "Views" / "site" / "index.html"
     if not site_html.exists():
@@ -746,7 +896,11 @@ def run_refresh(
 
     # Determine overall action
     active_actions = {c["action"] for c in changes}
-    if dry_run:
+    if "failed" in active_actions:
+        # Ahead of the dry-run branch: a failure is the headline either way, and
+        # "refreshed" would claim success for a run where something broke.
+        action = "degraded"
+    elif dry_run:
         action = "dry-run"
     elif active_actions <= {"up-to-date", "skip", "warn"}:
         action = "up-to-date"
@@ -757,6 +911,11 @@ def run_refresh(
         "action": action,
         "framework_version": version,
         "prior_version": prior_version,
+        "layout_version": _migrations.LAYOUT_VERSION,
+        # Re-read rather than assume the target: under --dry-run, or after the
+        # migration chain raised, the stamp never landed and reporting the target
+        # would tell doctor a project is migrated when it is not.
+        "project_layout_version": _migrations.read_layout_version(repo_root),
         "dry_run": dry_run,
         "integrations_detected": [k for k, v in detected.items() if v],
         "changes": changes,
