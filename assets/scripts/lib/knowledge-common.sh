@@ -172,6 +172,7 @@ kc_yaml_leaf_value() {
     awk -v key="$key" '
         $0 ~ "^[[:space:]]*" key ":[[:space:]]*" {
             value = $0
+            sub(/\r$/, "", value)
             sub("^[[:space:]]*" key ":[[:space:]]*", "", value)
             gsub(/^["'"'"']|["'"'"']$/, "", value)
             print value
@@ -347,6 +348,7 @@ kc_load_project_context() {
     local pointer_value=""
     local real_value=""
     local memory_root_value=""
+    local pattern=""
 
     TARGET_PROJECT="$(cd "$project_dir" 2>/dev/null && pwd)"
     [ -n "$TARGET_PROJECT" ] || kc_fail "Unable to resolve project dir: $project_dir"
@@ -432,6 +434,8 @@ kc_load_project_context() {
                     continue
                     ;;
             esac
+            kc_normalize_relative_path pattern "$pattern"
+            [ -n "$pattern" ] || continue
             KC_IGNORE_PATTERNS+=("$pattern")
         done < "$IGNORE_FILE"
     fi
@@ -471,28 +475,29 @@ kc_rel_knowledge_path() {
     esac
 }
 
+# Sets the caller-named variable ($1) instead of printing: this runs tens
+# of thousands of times per init, and a $(...) caller forks a subshell for
+# what is pure parameter expansion (bash 3.2 has no namerefs).
 kc_normalize_relative_path() {
-    local path="${1:-}"
-    path="${path#./}"
-    path="${path#/}"
-    printf '%s\n' "$path"
+    local kc_nrp_path="${2:-}"
+    kc_nrp_path="${kc_nrp_path#./}"
+    kc_nrp_path="${kc_nrp_path#/}"
+    printf -v "$1" '%s' "$kc_nrp_path"
 }
 
+# KC_IGNORE_PATTERNS entries are normalized once at load time.
 kc_path_is_ignored() {
     local path=""
     local pattern=""
-    local normalized_pattern=""
     local base=""
 
-    path="$(kc_normalize_relative_path "${1:-}")"
+    kc_normalize_relative_path path "${1:-}"
     [ -n "$path" ] || return 1
 
     for pattern in "${KC_IGNORE_PATTERNS[@]+"${KC_IGNORE_PATTERNS[@]}"}"; do
-        normalized_pattern="$(kc_normalize_relative_path "$pattern")"
-        [ -n "$normalized_pattern" ] || continue
-        case "$normalized_pattern" in
+        case "$pattern" in
             */)
-                base="${normalized_pattern%/}"
+                base="${pattern%/}"
                 case "$path" in
                     $base|$base/*)
                         return 0
@@ -501,7 +506,7 @@ kc_path_is_ignored() {
                 ;;
             *)
                 case "$path" in
-                    $normalized_pattern|$normalized_pattern/*)
+                    $pattern|$pattern/*)
                         return 0
                         ;;
                 esac
@@ -517,7 +522,7 @@ kc_filter_relative_lines() {
 
     while IFS= read -r line; do
         [ -n "$line" ] || continue
-        normalized="$(kc_normalize_relative_path "$line")"
+        kc_normalize_relative_path normalized "$line"
         if kc_path_is_ignored "$normalized"; then
             continue
         fi
@@ -570,12 +575,14 @@ kc_signature_from_paths() {
 kc_signature_from_project_relative_lines() {
     local relpaths_text="${1:-}"
     local line=""
+    local rel=""
     local abs=""
     local text=""
 
     while IFS= read -r line; do
         [ -n "$line" ] || continue
-        abs="$TARGET_PROJECT/$(kc_normalize_relative_path "$line")"
+        kc_normalize_relative_path rel "$line"
+        abs="$TARGET_PROJECT/$rel"
         if [ -e "$abs" ]; then
             text="${text}$(kc_stat_signature_line "$abs" "$line")"$'\n'
         else

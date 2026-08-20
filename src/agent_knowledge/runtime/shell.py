@@ -19,6 +19,56 @@ _WINDOWS_BASH_CANDIDATES = [
 
 _bash_exe: str | None = None
 
+# Cached `arch` prefix for bash children; None until first computed.
+_bash_prefix: list[str] | None = None
+
+
+def _proc_translated() -> bool:
+    """Whether this Python runs translated under Rosetta 2."""
+    try:
+        r = subprocess.run(
+            ["sysctl", "-n", "sysctl.proc_translated"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return r.stdout.strip() == "1"
+
+
+def _native_bash_ok(bash: str) -> bool:
+    """Whether bash can be launched natively via `arch -arm64`."""
+    try:
+        r = subprocess.run(
+            ["arch", "-arm64", bash, "-c", "true"],
+            capture_output=True,
+            timeout=5,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return r.returncode == 0
+
+
+def _rosetta_escape_prefix(bash: str) -> list[str]:
+    """Return ["arch", "-arm64"] when bash children should escape Rosetta.
+
+    A translated (x86_64) Python on Apple Silicon spawns the x86_64 slice of
+    universal binaries, so bash and every tool it forks would run translated
+    too -- a ~7x penalty on fork-heavy scripts. Launching bash through
+    `arch -arm64` puts the whole script back on the native architecture.
+
+    Cached for the first bash seen; fine today because _find_bash() also
+    caches, so every caller passes the same executable.
+    """
+    global _bash_prefix
+    if _bash_prefix is not None:
+        return _bash_prefix
+    _bash_prefix = []
+    if sys.platform == "darwin" and _proc_translated() and _native_bash_ok(bash):
+        _bash_prefix = ["arch", "-arm64"]
+    return _bash_prefix
+
 
 def _find_bash() -> str:
     """Return the bash executable path, raising RuntimeError on Windows if not found."""
@@ -57,7 +107,7 @@ def run_bash_script(name: str, args: list[str]) -> int:
     except RuntimeError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
-    result = subprocess.run([bash, str(script)] + args)
+    result = subprocess.run([*_rosetta_escape_prefix(bash), bash, str(script)] + args)
     return result.returncode
 
 

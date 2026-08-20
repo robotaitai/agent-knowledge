@@ -98,7 +98,7 @@ list_existing_paths() {
     local rel=""
 
     for path in "$@"; do
-        rel="$(kc_normalize_relative_path "$path")"
+        kc_normalize_relative_path rel "$path"
         [ -e "$base/$rel" ] || continue
         if kc_path_is_ignored "$rel"; then
             SKIPPED+=("$rel")
