@@ -73,6 +73,32 @@ History records what happened over time -- releases, integrations, sync events.
 It is not a git replacement. Current truth lives in `Memory/`, and current focus
 lives in `Work/`.
 
+## Team members
+
+For a team sharing one vault in git, bedrock keeps each member's perspective
+separate from the shared consensus -- two additive folders under `Memory/`:
+
+- `Memory/Members/<id>/` — one folder per member (person or agent). Each member
+  edits only their own folder, so people never produce git merge conflicts, and
+  distinct perspectives are preserved. Committed on purpose: a lead can read each
+  member's stance.
+- `Memory/Team/` — normalized consensus the team converged on. Canonical truth.
+
+```bash
+bedrock member add "Dana Levi" --role Backend   # scaffold PROFILE.md + notes.md
+bedrock member add "Aria" --kind agent          # a member can be an agent
+bedrock member list                              # who exists, roles, note counts
+bedrock member use "Dana Levi"                  # set current member (this machine)
+bedrock member whoami                            # the resolved current member
+```
+
+The current member ("who am I") resolves by precedence: the `BEDROCK_MEMBER`
+environment variable, then `.bedrock/member` (written by `member use`; per-machine
+and gitignored), then the slug of `git config user.name`. Because the vault lives
+in git, the git-user fallback usually means no setup is needed. `bedrock bootstrap`
+ensures `Memory/Team/` and `Memory/Members/` exist; everything is additive, so
+existing vaults keep working unchanged.
+
 ## Keeping up to date
 
 ```bash

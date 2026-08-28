@@ -49,12 +49,15 @@ Project Bedrock separates project knowledge by purpose.
 | Layer | Role | Canonical? |
 |---|---|---|
 | `Memory/` | Stable project truth, decisions, architecture, conventions | Yes |
+| `Memory/Team/` | Normalized team consensus reached through managed dialogue | Yes |
+| `Memory/Members/<id>/` | A single member's own perspective (person or agent) | No — perspective, not consensus |
 | `History/` | What happened over time | Yes, as a diary |
 | `Evidence/` | Raw or imported supporting material | No |
 | `Outputs/` | Generated views, indexes, HTML, graphs | No |
 | `Sessions/` | Temporary working state | No |
 
-Do not treat imported evidence or generated outputs as truth.
+Do not treat imported evidence or generated outputs as truth. A member's
+perspective in `Members/` is not team truth until it graduates into `Team/`.
 
 Only deliberately curated knowledge belongs in `Memory/`.
 

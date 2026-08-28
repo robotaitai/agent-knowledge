@@ -299,7 +299,163 @@ def bootstrap(
     if profile:
         args.extend(["--profile", profile])
     _add_common_flags(args, dry_run=dry_run, json_mode=json_mode, force=force)
-    sys.exit(run_bash_script("bootstrap-memory-tree.sh", args))
+    code = run_bash_script("bootstrap-memory-tree.sh", args)
+    # Ensure the per-member context scaffold (Memory/Team, Memory/Members) exists
+    # so new vaults get the structure. Additive and idempotent.
+    if code == 0 and not dry_run:
+        from agent_knowledge.runtime import members as members_mod
+
+        vault = Path(project).resolve() / "bedrock"
+        if (vault / "Memory").is_dir():
+            created = members_mod.ensure_scaffold(vault)
+            if created and not json_mode:
+                for rel in created:
+                    click.echo(f"  member scaffold: {rel}", err=True)
+    sys.exit(code)
+
+
+# -- member ---------------------------------------------------------------- #
+
+
+@main.group()
+def member() -> None:
+    """Manage per-member context: distinct "minds" + shared team consensus."""
+
+
+def _vault_or_exit(project: str) -> Path:
+    """Resolve the vault dir for a project, exiting 1 if it does not exist."""
+    vault = Path(project).resolve() / "bedrock"
+    if not vault.is_dir():
+        click.echo("No bedrock vault found. Run: bedrock init", err=True)
+        sys.exit(1)
+    return vault
+
+
+@member.command("add")
+@click.argument("name")
+@click.option("--role", default=None, help="Short role/title for this member.")
+@click.option(
+    "--kind",
+    type=click.Choice(["person", "agent"]),
+    default="person",
+    help="Member kind (a teammate or an agent).",
+)
+@click.option("--project", default=".", type=click.Path(exists=True), help="Project repo root.")
+@click.option("--force", is_flag=True, help="Overwrite existing member files.")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON only.")
+def member_add(
+    name: str,
+    role: str | None,
+    kind: str,
+    project: str,
+    force: bool,
+    json_mode: bool,
+) -> None:
+    """Scaffold a member folder (PROFILE.md + notes.md) under Memory/Members/."""
+    import json as json_mod
+
+    from agent_knowledge.runtime import members as members_mod
+
+    vault = _vault_or_exit(project)
+    try:
+        result = members_mod.add_member(vault, name, role=role, kind=kind, force=force)
+    except ValueError as exc:
+        click.echo(f"error: {exc}", err=True)
+        sys.exit(1)
+
+    if json_mode:
+        click.echo(json_mod.dumps(result, indent=2))
+        return
+
+    click.secho(f"Member '{result['slug']}' ready", bold=True, err=True)
+    if result["created"]:
+        for rel in result["created"]:
+            click.echo(f"  created: {rel}", err=True)
+    else:
+        click.echo("  (already existed -- nothing to create)", err=True)
+    click.echo(f"  folder: {result['path']}", err=True)
+
+
+@member.command("list")
+@click.option("--project", default=".", type=click.Path(exists=True), help="Project repo root.")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON only.")
+def member_list(project: str, json_mode: bool) -> None:
+    """List members (folders under Memory/Members/)."""
+    import json as json_mod
+
+    from agent_knowledge.runtime import members as members_mod
+
+    vault = _vault_or_exit(project)
+    members = members_mod.list_members(vault)
+
+    if json_mode:
+        click.echo(json_mod.dumps({"members": members}, indent=2))
+        return
+
+    if not members:
+        click.echo("No members yet. Add one: bedrock member add <name>", err=True)
+        return
+
+    current = members_mod.resolve_member(Path(project).resolve())
+    click.secho(f"Members ({len(members)}):", bold=True, err=True)
+    for m in members:
+        marker = " *" if m["slug"] == current else "  "
+        click.echo(
+            f"{marker} {m['slug']}  [{m['kind']}]  {m['role']}  ({m['notes']} notes)",
+            err=True,
+        )
+    if current:
+        click.echo(f"\n  * = you ({current})", err=True)
+
+
+@member.command("whoami")
+@click.option("--project", default=".", type=click.Path(exists=True), help="Project repo root.")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON only.")
+def member_whoami(project: str, json_mode: bool) -> None:
+    """Show the resolved current member (env -> .bedrock/member -> git user)."""
+    import json as json_mod
+
+    from agent_knowledge.runtime import members as members_mod
+
+    repo = Path(project).resolve()
+    current = members_mod.resolve_member(repo)
+
+    if json_mode:
+        click.echo(json_mod.dumps({"member": current}, indent=2))
+        return
+
+    if current:
+        click.echo(current)
+    else:
+        click.echo(
+            "(no member set -- `bedrock member use <name>` or set BEDROCK_MEMBER)",
+            err=True,
+        )
+        sys.exit(1)
+
+
+@member.command("use")
+@click.argument("name")
+@click.option("--project", default=".", type=click.Path(exists=True), help="Project repo root.")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON only.")
+def member_use(name: str, project: str, json_mode: bool) -> None:
+    """Set the current member for this machine (writes .bedrock/member)."""
+    import json as json_mod
+
+    from agent_knowledge.runtime import members as members_mod
+
+    repo = Path(project).resolve()
+    try:
+        slug = members_mod.set_current_member(repo, name)
+    except ValueError as exc:
+        click.echo(f"error: {exc}", err=True)
+        sys.exit(1)
+
+    if json_mode:
+        click.echo(json_mod.dumps({"member": slug}, indent=2))
+        return
+
+    click.echo(f"Current member set to '{slug}' (this machine).", err=True)
 
 
 # -- import ---------------------------------------------------------------- #

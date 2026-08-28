@@ -163,6 +163,32 @@ Bedrock does not force every repo into the same documentation template.
 - A SaaS repo may organize Memory around `frontend/`, `backend/`, `auth/`, `billing/`, and `data/`
 - Bedrock itself may organize Memory around `product/`, `runtime/`, `cli/`, `integrations/`, `memory-model/`, and `views/`
 
+### Distinct Minds + Team Consensus
+
+When a team shares one vault in git, you want two things that pull in opposite
+directions: each person's own perspective preserved, *and* a single agreed truth.
+Bedrock keeps both, as additive folders under `Memory/`:
+
+| | Folder | What goes here | Canon? |
+|---|--------|---------------|:------:|
+| 👤 | **`Memory/Members/<id>/`** | One folder per member (person **or** agent) -- their own perspective. Each member edits only their folder, so people never collide in git. | No (perspective) |
+| 🤝 | **`Memory/Team/`** | Normalized consensus the team converged on through managed dialogue. | **Yes** |
+
+Member folders are committed on purpose -- that is the transparency: a lead can
+read each person's stance, and members know their view is recorded and visible.
+
+```bash
+bedrock member add "Dana Levi" --role Backend   # scaffold a mind
+bedrock member add "Aria" --kind agent          # agents are members too
+bedrock member use "Dana Levi"                  # tell bedrock who you are (this machine)
+bedrock member whoami                            # resolved: env -> .bedrock/member -> git user
+bedrock member list                              # who exists + roles
+```
+
+Identity resolves from `BEDROCK_MEMBER`, then `.bedrock/member` (per-machine,
+gitignored), then your `git config user.name` -- so in a git-backed vault it
+usually just works with no setup.
+
 ---
 
 ## 🔌 Project-Local Integration
@@ -303,13 +329,14 @@ Obsidian is optional. Works without it too.
 | `ship` | Validate + sync + commit + push |
 | `view` | Build the site and open it -- prints the path instead when there is no display, `--serve` to forward a port over SSH |
 | `doctor` | Validate setup, integration health, note staleness |
+| `member` | Manage per-member context: `add` / `list` / `whoami` / `use` |
 
 <details>
 <summary><b>All commands</b></summary>
 
 <br>
 
-`absorb` &middot; `search` &middot; `export-html` &middot; `export-canvas` &middot; `clean-import` &middot; `refresh-system` &middot; `backfill-history` &middot; `compact` &middot; `migrate-to-local` &middot; `init --external`
+`absorb` &middot; `search` &middot; `member` &middot; `export-html` &middot; `export-canvas` &middot; `clean-import` &middot; `refresh-system` &middot; `backfill-history` &middot; `compact` &middot; `migrate-to-local` &middot; `init --external`
 
 All write commands support `--dry-run` and `--json`. Run `bedrock --help` for the full list.
 

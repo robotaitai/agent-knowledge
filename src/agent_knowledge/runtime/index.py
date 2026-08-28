@@ -88,7 +88,7 @@ def build_index(vault_dir: Path) -> dict[str, Any]:
         folder_dir = vault_dir / folder
         if not folder_dir.is_dir():
             continue
-        canonical = folder in _CANONICAL_FOLDERS
+        folder_canonical = folder in _CANONICAL_FOLDERS
 
         for md_file in sorted(folder_dir.rglob("*.md")):
             if md_file.name in {"README.md"}:
@@ -99,6 +99,14 @@ def build_index(vault_dir: Path) -> dict[str, Any]:
             except OSError:
                 continue
 
+            # A member's own perspective (Memory/Members/<id>/) is NOT canonical
+            # team truth — surface it under its own "Members" group, non-canonical,
+            # so default search ranks/filters it below consensus. Memory/Team/ and
+            # the rest of Memory/ stay canonical.
+            is_member_note = rel.startswith("Memory/Members/")
+            canonical = folder_canonical and not is_member_note
+            folder_label = "Members" if is_member_note else folder
+
             fm = _extract_frontmatter(text)
             notes.append(
                 {
@@ -107,7 +115,7 @@ def build_index(vault_dir: Path) -> dict[str, Any]:
                     "note_type": fm.get("note_type", "unknown"),
                     "area": fm.get("area", fm.get("project", "")),
                     "canonical": canonical,
-                    "folder": folder,
+                    "folder": folder_label,
                     "is_branch_entry": _is_branch_entry(rel),
                     "summary": _first_content_lines(text),
                 }
@@ -159,10 +167,17 @@ def write_index(vault_dir: Path, *, dry_run: bool = False) -> list[str]:
         f"Total notes: {index['note_count']}\n",
         "\n",
     ]
-    for folder in _FOLDER_ORDER:
+    # Render Members (perspective) right after Memory, before the rest.
+    render_order = list(_FOLDER_ORDER)
+    if "Members" in groups:
+        render_order.insert(render_order.index("Memory") + 1, "Members")
+    for folder in render_order:
         if folder not in groups:
             continue
-        tag = "canonical" if folder in _CANONICAL_FOLDERS else "non-canonical"
+        if folder == "Members":
+            tag = "non-canonical"
+        else:
+            tag = "canonical" if folder in _CANONICAL_FOLDERS else "non-canonical"
         md_lines.append(f"## {folder} [{tag}]\n\n")
         for note in groups[folder]:
             entry_marker = " (branch entry)" if note["is_branch_entry"] else ""
